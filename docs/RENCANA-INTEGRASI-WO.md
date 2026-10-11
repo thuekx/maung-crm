@@ -1,6 +1,6 @@
 # Rencana integrasi maung-crm ↔ Maung WO (jalur satu domain)
 
-Sumber kebenaran sisi WO: `docs/maung-crm/INTEGRASI-WO.md` di repo Maung-Wo-Inv (dibaca HEAD `b864723`). Dokumen ini = rencana sisi CRM. Status: rencana **DISETUJUI**; overlay Caddy sendiri dihapus. **Tahap 1 (kode) SELESAI** — menunggu persetujuan pemilik sebelum Tahap 2. Catatan implementasi Tahap 1: CSP dasar (produksi) + header keamanan, popup peta dirakit dari node DOM (bukan HTML), `cors` dihapus (satu origin).
+Sumber kebenaran sisi WO: `docs/maung-crm/INTEGRASI-WO.md` di repo Maung-Wo-Inv (dibaca HEAD `b864723`). Dokumen ini = rencana sisi CRM. Status: rencana **DISETUJUI**. **Tahap 1 (kode) dan Tahap 2 (compose + CI, hanya berkas repo) SELESAI** — menunggu persetujuan pemilik sebelum Tahap 3. Catatan: CSP dasar `unsafe-inline` diterima apa adanya; versi berbasis nonce = tahap terpisah OPSIONAL (tidak dikerjakan). Tes otomatis menjaga: tanpa HTML mentah di `apps/web/src`, aturan jaringan/port/`IMAGE_TAG` pada compose. Migrasi CRM uji (port 3100 → `/crm`) terjadi di Tahap 3, bukan Tahap 2.
 Prinsip: satu repo satu penulis (sesi CRM hanya menulis di repo ini; sesi WO hanya di repo WO; saling membaca lewat berkas di `main`).
 
 ## Keputusan pemilik (dicatat)
@@ -34,3 +34,11 @@ Setelahnya (terpisah, perlu persetujuan sendiri): modul Lead / Opportunity / Quo
 - `maung_token` ada di penyimpanan origin yang sama dengan WO ⇒ XSS di CRM berarti token WO bocor. Aturan CRM: tanpa HTML mentah (hanya render teks React), CSP dipertimbangkan.
 - Daftar PIC CRM berasal dari user WO yang pernah memanggil CRM (cache dari `/auth/me`); tidak ada endpoint daftar user di WO.
 - Migrasi dari deployment uji sekarang (port 3100): data CRM masih uji; volume Postgres/Garage dipertahankan, container `web`/`api` lama dibuang (`--remove-orphans`).
+
+## Bukti wajib di RESULT `update.sh` (Tahap 3) — disepakati dengan sesi WO, tanpa menempel token
+a. dari container `crm-api`: `GET {WO_URL}/api/auth/me` tanpa token = **401** (terjangkau & rute benar);
+b. via Caddy: `https://maung.liv.net.id/crm/api/health` = 200 dan `/crm/` = 200 atau alih ke login;
+c. `https://maung.liv.net.id/login` dan `/api/branding` tetap 200 (WO tak terganggu);
+d. `crm-web` & `crm-api` ada di jaringan `maung_edge`; tidak ada port CRM terbuka di host.
+Penerimaan akhir (manual, pemilik): login WO → `/apps` → ikon CRM → CRM terbuka tanpa login ulang; 35 menit aktif tidak keluar sesi.
+Urutan go-live: daftarkan CRM di Admin WO ("Tampil di beranda" MATI) → atur Hak Akses "Aplikasi: CRM" → deploy CRM + `crm.caddy` → baru nyalakan ikon.

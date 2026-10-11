@@ -1,4 +1,7 @@
-> ⚠️ **SEDANG DIROMBAK (integrasi jalur satu domain `/crm`, lihat `docs/RENCANA-INTEGRASI-WO.md`).** Tahap 1 (kode) selesai: image baru memakai `basePath /crm`, API di `/crm/api` port 4000, tanpa halaman login. **Compose dan skrip di bawah belum disesuaikan (Tahap 2–3) — jangan jalankan `install.sh`/`bootstrap.sh` terhadap image `latest` terbaru.** Untuk menahan deployment uji yang sudah berjalan: set `IMAGE_TAG=0c467c861404dc1076d3f501fc2a1b262e56c5ef` di `.env` CRM sebelum `docker compose pull`. Overlay Caddy sendiri sudah dihapus (CRM tidak menjalankan proxy).
+> ⚠️ **SEDANG DIROMBAK — integrasi jalur satu domain `/crm` (lihat `docs/RENCANA-INTEGRASI-WO.md`).** Tahap 1 (kode) dan Tahap 2 (compose + CI) selesai **di repo saja**. Compose baru: `crm-web`/`crm-api` di jaringan eksternal `maung_edge`, tanpa port host, `IMAGE_TAG` wajib (SHA commit). **Skrip server baru (`scripts/update.sh`, deploy key) baru ada di Tahap 3.** Sampai itu selesai:
+> - **jangan `git pull` / jalankan bootstrap di `~/maung-crm` di server** dan jangan menjalankan `docker compose` di sana (compose baru mewajibkan `IMAGE_TAG` dan jaringan `maung_edge`; CRM uji di port 3100 tetap berjalan dengan container lamanya dan tidak disentuh);
+> - `install.sh`/`bootstrap.sh` lama sengaja diblokir (`CRM_ALLOW_LEGACY=1` untuk membuka; tidak disarankan).
+> Isi di bawah adalah panduan LAMA dan akan ditulis ulang di Tahap 3.
 
 # Deploy maung-crm (image siap tarik)
 

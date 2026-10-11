@@ -28,6 +28,15 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Validasi compose (IMAGE_TAG wajib; valid bila diisi)
+        env:
+          POSTGRES_PASSWORD: ci
+          WO_URL: https://wo.example.test
+          FILE_SIGN_SECRET: ci
+          GARAGE_RPC_SECRET: ci
+        run: |
+          if docker compose config -q 2>/dev/null; then echo "IMAGE_TAG seharusnya wajib"; exit 1; fi
+          IMAGE_TAG=ci-validate docker compose config -q
 
   images:
     needs: test
@@ -52,8 +61,9 @@ jobs:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
           push: true
+          # Tag yang dipakai server = SHA commit penuh. `latest` hanya alias informatif (compose tidak memakainya).
           tags: |
-            ghcr.io/thuekx/maung-crm-${{ matrix.app }}:latest
             ghcr.io/thuekx/maung-crm-${{ matrix.app }}:${{ github.sha }}
+            ghcr.io/thuekx/maung-crm-${{ matrix.app }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
