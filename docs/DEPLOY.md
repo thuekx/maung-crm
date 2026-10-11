@@ -5,6 +5,13 @@ Image dibangun otomatis oleh GitHub Actions (`.github/workflows/ci.yml`) setiap 
 
 > Status verifikasi: Dockerfile & compose divalidasi sintaks (`docker compose config`) dan langkah-langkahnya disimulasikan manual (build API, `npm ci --omit=dev`, start + migrasi; build Next standalone + start). **Belum pernah dijalankan sebagai image/container, belum diuji dengan Garage asli, dan workflow CI belum pernah berjalan.** Uji pertama di staging.
 
+## Cara cepat (disarankan)
+```
+git clone https://github.com/thuekx/maung-crm.git && cd maung-crm
+bash deploy/install.sh --wo-url https://wo.perusahaan.co.id     # tambahkan --wo-vm bila satu VM dengan WO
+```
+Skrip membuat `.env` (secret acak, tidak menimpa yang ada), mendeteksi/memeriksa `WO_URL`, menarik image, menjalankan stack, menginisialisasi Garage, dan mengecek kesehatan. Bila package GHCR private: awali dengan `GHCR_TOKEN=<token read:packages>`. Bagian di bawah adalah langkah manualnya.
+
 ## A. Sekali: jadikan image bisa ditarik
 1. Setelah workflow pertama sukses, buka GitHub → Packages → `maung-crm-api` dan `maung-crm-web` → *Package settings*: set visibilitas (private → server perlu login) atau public.
 2. Server private: `echo <PAT read:packages> | docker login ghcr.io -u thuekx --password-stdin` (jangan tempel token di chat).
