@@ -1,55 +1,34 @@
-> ⚠️ **SEDANG DIROMBAK — integrasi jalur satu domain `/crm` (lihat `docs/RENCANA-INTEGRASI-WO.md`).** Tahap 1 (kode) dan Tahap 2 (compose + CI) selesai **di repo saja**. Compose baru: `crm-web`/`crm-api` di jaringan eksternal `maung_edge`, tanpa port host, `IMAGE_TAG` wajib (SHA commit). **Skrip server baru (`scripts/update.sh`, deploy key) baru ada di Tahap 3.** Sampai itu selesai:
-> - **jangan `git pull` / jalankan bootstrap di `~/maung-crm` di server** dan jangan menjalankan `docker compose` di sana (compose baru mewajibkan `IMAGE_TAG` dan jaringan `maung_edge`; CRM uji di port 3100 tetap berjalan dengan container lamanya dan tidak disentuh);
-> - `install.sh`/`bootstrap.sh` lama sengaja diblokir (`CRM_ALLOW_LEGACY=1` untuk membuka; tidak disarankan).
-> Isi di bawah adalah panduan LAMA dan akan ditulis ulang di Tahap 3.
+# Deploy maung-crm — jalur `/crm` pada domain Maung WO
 
-# Deploy maung-crm (image siap tarik)
+Satu domain (`https://maung.liv.net.id`), satu login (Maung WO), CRM di `/crm`. Caddy milik WO; CRM **tidak** membuka port host dan tidak menjalankan proxy. `crm-web` (3000) dan `crm-api` (4000) bergabung ke jaringan eksternal `maung_edge`; PostgreSQL/PostGIS dan Garage hanya di jaringan privat CRM. Rencana dan keputusan: `docs/RENCANA-INTEGRASI-WO.md`; kontrak sisi WO: `docs/maung-crm/INTEGRASI-WO.md` (repo Maung-Wo-Inv).
 
-Image dibangun otomatis oleh GitHub Actions (`.github/workflows/ci.yml`) setiap push ke `main` yang lulus tes, lalu di-push ke GHCR:
-`ghcr.io/thuekx/maung-crm-api` dan `ghcr.io/thuekx/maung-crm-web` (tag `latest` dan SHA commit).
+Semua perintah server = skrip di repo + satu perintah salin-tempel, berfase, dengan blok RESULT dan log di `~/maung-crm-logs/`. Guard: host `maung-apps`, **bukan root, tanpa sudo**, jaringan `maung_edge` ada. **Tidak pernah membuat/menimpa/mengubah `.env` WO** (diverifikasi checksum). Sekali: image bertag **SHA commit** (`IMAGE_TAG` wajib; `latest` tidak dipakai).
 
-> Status verifikasi: Dockerfile & compose divalidasi sintaks (`docker compose config`) dan langkah-langkahnya disimulasikan manual (build API, `npm ci --omit=dev`, start + migrasi; build Next standalone + start). **Belum pernah dijalankan sebagai image/container, belum diuji dengan Garage asli, dan workflow CI belum pernah berjalan.** Uji pertama di staging.
+## A. Sekali (peralihan dari CRM uji lama + pemasangan deploy key)
+1. **Bootstrap token** — satu-satunya langkah yang butuh token GitHub (classic; scope `repo` + `read:packages`), karena repo private dan skrip baru belum ada di server. Tempel blok `bash <<'BOOT' … BOOT` berisi `scripts/bootstrap-token.sh` (token hanya di memori; `docker login ghcr.io` tersimpan untuk tarik image). Skrip lanjut ke `setup-deploy-key.sh` dan berhenti `WAITING_KEY` sambil mencetak **kunci publik**.
+2. **Browser (GitHub):** `thuekx/maung-crm` → Settings → Deploy keys → Add deploy key → Title `maung-apps`, tempel kunci publik, **JANGAN centang "Allow write access"**.
+3. `cd ~/maung-crm && bash scripts/setup-deploy-key.sh </dev/null` — verifikasi `git ls-remote`, uji kunci read-only, remote `origin` beralih ke SSH.
 
-## Cara cepat (disarankan)
-Blok bootstrap kanonik ada di `deploy/bootstrap.sh` (dibungkus `bash <<'BOOT' … BOOT` saat ditempel di server WO). Guard host/WO/direktori jalan sebelum token diminta.
-
+## B. Update (setiap kali; tanpa token)
 ```
-git clone https://github.com/thuekx/maung-crm.git && cd maung-crm
-bash deploy/install.sh --wo-url https://wo.perusahaan.co.id     # tambahkan --wo-vm bila satu VM dengan WO
+cd ~/maung-crm && git pull --ff-only origin main && bash scripts/update.sh </dev/null
 ```
-Skrip membuat `.env` (secret acak, tidak menimpa yang ada), mendeteksi/memeriksa `WO_URL`, menarik image, menjalankan stack, menginisialisasi Garage, dan mengecek kesehatan. Bila package GHCR private: awali dengan `GHCR_TOKEN=<token read:packages>`. Bagian di bawah adalah langkah manualnya.
+Fase: guard → snapshot WO baca-saja → `.env` CRM (backup dulu) → backup (`pg_dump` + arsip volume Garage) → tarik image → jalankan `crm-api`/`crm-web` → Garage → **bukti terhadap sistem asli** → finalisasi. **Rollback otomatis** bila gagal (tag sebelumnya; pada migrasi pertama container CRM uji lama tidak pernah dihentikan sampai bukti lolos). Data (volume Postgres/Garage) tidak pernah dibuang.
 
-## A. Sekali: jadikan image bisa ditarik
-1. Setelah workflow pertama sukses, buka GitHub → Packages → `maung-crm-api` dan `maung-crm-web` → *Package settings*: set visibilitas (private → server perlu login) atau public.
-2. Server private: `echo <PAT read:packages> | docker login ghcr.io -u thuekx --password-stdin` (jangan tempel token di chat).
+Bukti di RESULT (tanpa token): (a) dari container `crm-api`: `GET {WO_URL}/api/auth/me` tanpa token = 401; (b) via Caddy: `/crm/api/health` dan `/crm/` (status **PENDING** selama `deploy/crm.caddy` belum dipasang di WO — bukan kegagalan); (c) `/login` dan `/api/branding` WO tetap 200 serta `.env`/container WO tidak berubah; (d) `crm-web`/`crm-api` ada di `maung_edge` dan terjangkau dari jaringan itu, tidak ada port CRM di host.
 
-## B. Persiapan server
-1. DNS A record `CRM_DOMAIN` → IP server (HTTPS wajib: kamera & GPS HP tidak jalan tanpa HTTPS).
-2. `git clone https://github.com/thuekx/maung-crm && cd maung-crm && cp .env.example .env`, isi `POSTGRES_PASSWORD`, `WO_URL`, `FILE_SIGN_SECRET`, `GARAGE_RPC_SECRET` (`openssl rand -hex 32`).
+## C. Urutan go-live (disepakati dengan sesi WO)
+1. Daftarkan CRM di Admin WO → Pengaturan → Aplikasi (ID `crm`, jalur `/crm`; **"Tampil di beranda" MATI**).
+2. Admin WO → Hak Akses → "Aplikasi: CRM": beri divisi/sub-role yang boleh.
+3. Jalankan update (bagian B). Sesi WO memasang `deploy/crm.caddy` di `proxy/apps/crm.caddy` dan memuat ulang Caddy; jalankan update lagi: bukti (b) harus `PASS`.
+4. Penerimaan manual pemilik: login WO → `/apps` → ikon CRM → CRM terbuka tanpa login ulang; 35 menit aktif tidak keluar sesi; kamera/GPS bekerja (HTTPS).
+5. Baru nyalakan "Tampil di beranda".
 
-## C. Jalankan
-Pilih satu mode:
+## D. Rollback manual, backup, log
+- Otomatis saat gagal; manual: set `IMAGE_TAG` ke SHA terakhir-baik (`~/maung-crm-logs/state/last_ok_tag`) lalu `docker compose up -d crm-api crm-web` di `~/maung-crm`.
+- Backup: `~/maung-crm-logs/backup/` (7 `pg_dump` terakhir, 3 arsip Garage, `.env` CRM). Arsip Garage = salinan volume saat berjalan (crash-consistent, best-effort).
+- Bila `docker pull` ditolak: token GHCR di `~/.docker` kedaluwarsa → ulangi bagian A.1.
 
-**C1. VM terpisah dari WO (Caddy sendiri):**
-`docker compose -f docker-compose.yml -f docker-compose.caddy.yml pull && docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d`
-
-**C2. VM SAMA dengan Maung WO** (80/443 sudah dipakai Caddy WO): web CRM bergabung ke jaringan WO dengan alias `crm-web`.
-`docker compose -f docker-compose.yml -f docker-compose.wo-vm.yml up -d` (cek nama jaringan: `docker network ls | grep maung-wo-inv`, isi `WO_NETWORK` bila beda).
-Lalu Caddy WO harus meneruskan `CRM_DOMAIN` ke `crm-web:3000` — butuh perubahan kecil di WO (Caddyfile yang dikelola otomatis oleh API WO akan menimpa edit manual). Lihat `deploy/crm.caddy` dan permintaan ke repo WO di bawah.
-
-## D. Inisialisasi Garage (sekali)
-`bash deploy/garage-init.sh` → salin `Key ID` dan `Secret key` ke `.env` (`S3_ACCESS_KEY`, `S3_SECRET_KEY`) → `docker compose up -d api`.
-
-## E. Cek
-`curl https://CRM_DOMAIN/api/health` → `{"ok":true}`; login dengan akun Maung WO (divisi MKT/ADMIN); buat report, ambil foto → foto tampil (tersimpan di Garage).
-
-## F. Update & rollback
-- Update: `docker compose pull && docker compose up -d` (migrasi DB berjalan otomatis saat api start).
-- Rollback: `IMAGE_TAG=<sha-sebelumnya> docker compose up -d` (migrasi bersifat maju-saja; backup DB dulu bila skema berubah).
-- Backup: `docker compose exec postgres pg_dump -U crm maung_crm | gzip > crm-$(date +%F).sql.gz` dan snapshot volume `garage_data`/`garage_meta`.
-
-## Build image manual (tanpa CI)
-```
-docker build -f apps/api/Dockerfile -t ghcr.io/thuekx/maung-crm-api:dev .
-docker build -f apps/web/Dockerfile -t ghcr.io/thuekx/maung-crm-web:dev .
-```
+## E. Yang sudah dan belum teruji
+- Teruji otomatis (CI): tes API, tes web (termasuk larangan HTML mentah), tes aturan compose, validasi compose, **alur `update.sh` dan `setup-deploy-key.sh` dengan docker/curl/ssh/git tiruan** (`tests/server-scripts/`: migrasi sukses, tiap jenis kegagalan + rollback, update kedua, host salah, root, `.env`/container WO berubah, secret tidak tercetak).
+- **Belum pernah dijalankan di server asli**: container sungguhan, Garage asli, Caddy `crm.caddy`, `/api/auth/me` WO asli (E2E memakai mock). Risiko ini dicatat; RESULT `update.sh` adalah buktinya.

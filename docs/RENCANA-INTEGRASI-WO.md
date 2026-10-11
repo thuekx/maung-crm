@@ -1,6 +1,6 @@
 # Rencana integrasi maung-crm ↔ Maung WO (jalur satu domain)
 
-Sumber kebenaran sisi WO: `docs/maung-crm/INTEGRASI-WO.md` di repo Maung-Wo-Inv (dibaca HEAD `b864723`). Dokumen ini = rencana sisi CRM. Status: rencana **DISETUJUI**. **Tahap 1 (kode) dan Tahap 2 (compose + CI, hanya berkas repo) SELESAI** — menunggu persetujuan pemilik sebelum Tahap 3. Catatan: CSP dasar `unsafe-inline` diterima apa adanya; versi berbasis nonce = tahap terpisah OPSIONAL (tidak dikerjakan). Tes otomatis menjaga: tanpa HTML mentah di `apps/web/src`, aturan jaringan/port/`IMAGE_TAG` pada compose. Migrasi CRM uji (port 3100 → `/crm`) terjadi di Tahap 3, bukan Tahap 2.
+Sumber kebenaran sisi WO: `docs/maung-crm/INTEGRASI-WO.md` di repo Maung-Wo-Inv (dibaca HEAD `b864723`). Dokumen ini = rencana sisi CRM. Status: rencana **DISETUJUI**. **Tahap 1 (kode), Tahap 2 (compose + CI) dan Tahap 3 (skrip server: `scripts/bootstrap-token.sh`, `setup-deploy-key.sh`, `update.sh`, tes `tests/server-scripts/`) SELESAI di repo** — belum dijalankan di server; menunggu pemilik menjalankan alur `docs/DEPLOY.md` bagian A–B, lalu Tahap 4 (serah-terima `crm.caddy`/pendaftaran di Admin WO) dan Tahap 5 (sinkron Export API). CSP `unsafe-inline` diterima; versi nonce = tahap opsional terpisah (tidak dikerjakan).
 Prinsip: satu repo satu penulis (sesi CRM hanya menulis di repo ini; sesi WO hanya di repo WO; saling membaca lewat berkas di `main`).
 
 ## Keputusan pemilik (dicatat)

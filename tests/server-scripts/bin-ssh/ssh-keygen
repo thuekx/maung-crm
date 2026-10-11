@@ -1,0 +1,8 @@
+#!/bin/bash
+a="$*"
+case "$a" in
+  *"-t ed25519"*) f="${a##* -f }"; echo "PRIVATE-KEY-RAHASIA" > "$f"; echo "ssh-ed25519 AAAAC3NzaTESTKEY maung-apps deploy key" > "$f.pub" ;;
+  *"-F github.com"*) grep -q github.com "$HOME/.ssh/known_hosts" 2>/dev/null || exit 1; echo "# Host github.com found: line 1"; grep github.com "$HOME/.ssh/known_hosts" | head -1 ;;
+  *"-lf"*) echo "256 SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU github.com (ED25519)" ;;
+esac
+exit 0

@@ -28,6 +28,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Uji skrip server (update.sh, setup-deploy-key.sh) dengan docker/ssh tiruan
+        run: bash tests/server-scripts/run.sh
       - name: Validasi compose (IMAGE_TAG wajib; valid bila diisi)
         env:
           POSTGRES_PASSWORD: ci

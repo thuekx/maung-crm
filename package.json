@@ -6,7 +6,8 @@
   ],
   "scripts": {
     "typecheck": "npm run typecheck -w apps/api && npm run typecheck -w apps/web",
-    "test": "npm test -w apps/api && npm test -w apps/web && node --test tests/*.test.mjs"
+    "test": "npm test -w apps/api && npm test -w apps/web && node --test tests/*.test.mjs",
+    "test:scripts": "bash tests/server-scripts/run.sh"
   },
   "devDependencies": {
     "yaml": "^2.9.1"

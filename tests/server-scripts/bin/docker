@@ -1,0 +1,66 @@
+#!/bin/bash
+# docker tiruan stateful untuk menguji scripts/update.sh (state di $STUB)
+echo "docker $*" >> "$STUB/calls.log"
+f() { [ -f "$STUB/$1" ]; }
+cmd="$1"; shift
+case "$cmd" in
+  info) exit 0 ;;
+  --version) echo "Docker version 29.0.0" ;;
+  network) f no_edge && exit 1; echo '[{"Name":"maung_edge"}]' ;;
+  volume) echo maung-crm_garage_meta; echo maung-crm_garage_data ;;
+  image) echo "ghcr.io/thuekx/maung-crm-web@sha256:abcdef0123456789abcdef" ;;
+  run)
+    a="$*"
+    if echo "$a" | grep -q alpine; then
+      host=$(echo "$a" | grep -o '[^ ]*:/b' | head -1 | sed 's/:\/b//'); n=$(echo "$a" | grep -o 'garage-[0-9-]*\.tgz' | head -1)
+      f garage_bk_fail && exit 1; head -c 4000 /dev/urandom > "$host/$n"
+    else
+      if echo "$a" | grep -q crm-api; then cat "$STUB/probe_api" 2>/dev/null || echo 200; else cat "$STUB/probe_web" 2>/dev/null || echo 200; fi
+    fi ;;
+  ps)
+    a="$*"
+    if echo "$a" | grep -q 'label=com.docker.compose.project=maung-wo-inv'; then cat "$STUB/wo_ids"
+    elif echo "$a" | grep -q 'label=com.docker.compose.project=maung-crm'; then
+      f legacy_gone || { echo "legacy_api_id api"; echo "legacy_web_id web"; }
+      echo "pg_id postgres"; echo "gar_id garage"; f crm_up && { echo "crmapi_id crm-api"; echo "crmweb_id crm-web"; }
+    fi ;;
+  rm) echo "$*" | grep -q legacy && touch "$STUB/legacy_gone" ;;
+  start) : ;;
+  inspect)
+    a="$*"; id="${@: -1}"
+    case "$a" in
+      *State.Health*) f "unhealthy_$id" && echo unhealthy || echo healthy ;;
+      *State.Status*) echo running ;;
+      *Networks*) case "$id" in crmapi_id|crmweb_id) echo "maung-crm_default maung_edge " ;; *) echo "maung-crm_default " ;; esac ;;
+      *NetworkSettings.Ports*) f ports_open && case "$id" in crmweb_id) echo "3000/tcp→host" ;; esac ;;
+    esac ;;
+  compose)
+    sub="$1"; shift
+    case "$sub" in
+      version) echo "v2.30.0" ;;
+      config) if [ "$1" = "--images" ]; then echo "ghcr.io/thuekx/maung-crm-api:$(grep "^IMAGE_TAG=" .env | cut -d= -f2-)"; echo "ghcr.io/thuekx/maung-crm-web:$(grep "^IMAGE_TAG=" .env | cut -d= -f2-)"; else f cfg_bad && { echo "config invalid" >&2; exit 1; }; grep -q '^IMAGE_TAG=.' .env || { echo "required variable IMAGE_TAG missing" >&2; exit 1; }; fi ;;
+      pull) f pull_denied && { echo "Error response from daemon: denied" >&2; exit 1; }; f pull_notfound && { echo "manifest unknown" >&2; exit 1; }; echo "pulled" ;;
+      up) f up_fail && { echo "up failed" >&2; exit 1; }; touch "$STUB/crm_up"; f mutate_wo_env && echo "X=1" >> "$HOME/Maung-Wo-Inv/.env"; f mutate_wo_ct && echo "wo-api-1 zzz exited" >> "$STUB/wo_ids"; echo "started" ;;
+      rm) rm -f "$STUB/crm_up" ;;
+      logs) echo "log line DATABASE_URL=postgresql://crm:SUPERSECRET@postgres/x S3_SECRET_KEY=abc123" ;;
+      ps)
+        a="$*"
+        if echo "$a" | grep -q -- '-aq'; then svc="${@: -1}"
+          case "$svc" in postgres) echo pg_id ;; garage) echo gar_id ;; crm-api) f crm_up && echo crmapi_id ;; crm-web) f crm_up && echo crmweb_id ;; esac
+        else echo "SERVICE STATUS"; echo "crm-api healthy"; fi ;;
+      exec)
+        shift_t=0; [ "$1" = "-T" ] && shift; svc="$1"; shift; a="$*"
+        case "$svc" in
+          postgres) f pgdump_empty && exit 0; for i in $(seq 1 60); do echo "INSERT INTO t VALUES ($i,'dummy data row to make dump bigger than threshold');"; done ;;
+          garage) case "$a" in *"status"*) echo "ID Hostname"; echo "0123456789abcdef host" ;; *"layout show"*) echo "0123456789abcdef" ;; *"key create"*) echo "Key ID: GKabc123"; echo "Secret key: s3cr3tvalue" ;; esac ;;
+          crm-api)
+            case "$a" in
+              *"/api/auth/me"*) cat "$STUB/me_status" 2>/dev/null || echo 401 ;;
+              *"crm/api/health"*) echo 200 ;;
+              *"crm/api/me"*) echo 401 ;;
+              *storage.js*) f storage_fail && exit 1 ;;
+            esac ;;
+        esac ;;
+    esac ;;
+esac
+exit 0

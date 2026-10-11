@@ -11,7 +11,7 @@ Skeleton + MVP awal Field Report berjalan dan teruji (14 tes API + uji browser E
 
 Belum dikerjakan (tahap berikutnya): review manager, dashboard KPI, prospek/partnership, reimbursement→Finance, offline sync, baca EXIF otomatis dari foto galeri, CI.
 
-Deploy (image GHCR, Garage, PostGIS, CI): lihat [`docs/DEPLOY.md`](docs/DEPLOY.md). Permintaan perubahan untuk repo WO: [`docs/PERMINTAAN-KE-WO.md`](docs/PERMINTAAN-KE-WO.md).
+Deploy (jalur `/crm` pada domain Maung WO; image GHCR bertag SHA, Garage, PostGIS): [`docs/DEPLOY.md`](docs/DEPLOY.md). Rencana integrasi: [`docs/RENCANA-INTEGRASI-WO.md`](docs/RENCANA-INTEGRASI-WO.md).
 
 ## Menjalankan (pengembangan)
 ```
