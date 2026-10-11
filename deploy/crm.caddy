@@ -1,8 +1,9 @@
-# Potongan Caddy untuk VM yang sama dengan Maung WO (butuh dukungan `import` di Caddyfile WO — lihat docs/DEPLOY.md).
-# Ganti crm.contoh.co.id dengan CRM_DOMAIN.
-crm.contoh.co.id {
-	reverse_proxy crm-web:3000 {
-		lb_try_duration 20s
-		lb_try_interval 500ms
-	}
+# crm.caddy — diserahkan ke pemilik/sesi WO untuk ditaruh di proxy/apps/crm.caddy (repo WO). CRM tidak menyentuh Caddy/WO.
+# Di-import DI DALAM blok situs WO, jadi hanya berisi direktif `handle`. Aturan lebih spesifik ditulis LEBIH DULU.
+# JANGAN dipasang sebelum Tahap 2 (compose crm-web/crm-api di jaringan maung_edge) diterapkan — sebelum itu /crm akan 502.
+handle /crm/api/* {
+	reverse_proxy crm-api:4000
+}
+handle /crm/* {
+	reverse_proxy crm-web:3000
 }
