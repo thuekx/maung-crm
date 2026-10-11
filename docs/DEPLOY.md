@@ -6,6 +6,8 @@ Image dibangun otomatis oleh GitHub Actions (`.github/workflows/ci.yml`) setiap 
 > Status verifikasi: Dockerfile & compose divalidasi sintaks (`docker compose config`) dan langkah-langkahnya disimulasikan manual (build API, `npm ci --omit=dev`, start + migrasi; build Next standalone + start). **Belum pernah dijalankan sebagai image/container, belum diuji dengan Garage asli, dan workflow CI belum pernah berjalan.** Uji pertama di staging.
 
 ## Cara cepat (disarankan)
+Blok bootstrap kanonik ada di `deploy/bootstrap.sh` (dibungkus `bash <<'BOOT' … BOOT` saat ditempel di server WO). Guard host/WO/direktori jalan sebelum token diminta.
+
 ```
 git clone https://github.com/thuekx/maung-crm.git && cd maung-crm
 bash deploy/install.sh --wo-url https://wo.perusahaan.co.id     # tambahkan --wo-vm bila satu VM dengan WO

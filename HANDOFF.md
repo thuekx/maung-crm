@@ -33,4 +33,5 @@ Keputusan terbuka untuk pemilik: lokasi object storage (MinIO/Garage vs volume),
 - **Guard dulu sebelum eksekusi**: tampilkan `pwd`, cek direktori (kosong / repo yang benar / bukan folder aplikasi lain), buat direktori baru khusus untuk aplikasi, dan hentikan tanpa mengubah apa pun bila ragu. Jangan jalankan perintah di direktori yang belum diperiksa (insiden: `cp .env.example .env` menimpa `.env` Maung WO saat `cd` gagal).
 - Skrip menulis log audit ke `~/maung-crm-logs/`, tidak pernah mencetak secret, dan tidak menimpa `.env`.
 - Minta pemilik mengetik/menjalankan perintah manual hanya bila benar-benar tidak mungkin (mis. token GitHub untuk repo private); jelaskan alasannya.
+- **Jangan minta pemilik mengubah/menyunting skrip** (mis. "ubah baris pertama", "isi variabel ini", "ganti nama host"). Selalu berikan **skrip UTUH yang siap tempel dan jalankan** setiap kali ada perubahan; bila ada mode berbeda (mis. diagnosis), sediakan sebagai blok utuh terpisah atau jadikan perilaku bawaan. Alasan: sunting manual rawan salah.
 
