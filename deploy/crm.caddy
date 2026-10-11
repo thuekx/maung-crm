@@ -1,0 +1,8 @@
+# Potongan Caddy untuk VM yang sama dengan Maung WO (butuh dukungan `import` di Caddyfile WO — lihat docs/DEPLOY.md).
+# Ganti crm.contoh.co.id dengan CRM_DOMAIN.
+crm.contoh.co.id {
+	reverse_proxy crm-web:3000 {
+		lb_try_duration 20s
+		lb_try_interval 500ms
+	}
+}

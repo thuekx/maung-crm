@@ -11,7 +11,9 @@ Skeleton + MVP awal Field Report berjalan dan teruji (14 tes API + uji browser E
 
 Belum dikerjakan (tahap berikutnya): review manager, dashboard KPI, prospek/partnership, reimbursement→Finance, offline sync, baca EXIF otomatis dari foto galeri, CI.
 
-## Menjalankan
+Deploy (image GHCR, Garage, PostGIS, CI): lihat [`docs/DEPLOY.md`](docs/DEPLOY.md). Permintaan perubahan untuk repo WO: [`docs/PERMINTAAN-KE-WO.md`](docs/PERMINTAAN-KE-WO.md).
+
+## Menjalankan (pengembangan)
 ```
 npm install
 createdb maung_crm            # PostgreSQL 16
@@ -20,4 +22,4 @@ npm start -w apps/api         # :4100, migrasi otomatis
 npm run build -w apps/web && npm start -w apps/web   # :3100, /api diproksikan ke API_URL
 npm test                      # butuh DB maung_crm_test
 ```
-Catatan: akses data memakai `pg` + migrasi SQL (bukan Prisma) agar sederhana; foto disimpan di volume `UPLOAD_DIR` dan disajikan lewat signed URL. Kamera/GPS butuh HTTPS di produksi.
+Catatan: akses data memakai `pg` + migrasi SQL (bukan Prisma) agar sederhana; foto disimpan lewat antarmuka storage (`STORAGE_DRIVER=local` volume `UPLOAD_DIR`, atau `s3` untuk Garage) dan disajikan lewat signed URL. Kamera/GPS butuh HTTPS di produksi.

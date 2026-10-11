@@ -1,0 +1,60 @@
+name: maung-crm
+
+# Semua konfigurasi lewat .env (lihat .env.example). Image ditarik dari GHCR:
+#   docker compose pull && docker compose up -d
+x-api-env: &api-env
+  TZ: Asia/Jakarta
+  DATABASE_URL: postgresql://crm:${POSTGRES_PASSWORD:?isi POSTGRES_PASSWORD}@postgres:5432/maung_crm
+  WO_URL: ${WO_URL:?isi WO_URL (alamat Maung WO)}
+  FILE_SIGN_SECRET: ${FILE_SIGN_SECRET:?isi FILE_SIGN_SECRET}
+  STORAGE_DRIVER: ${STORAGE_DRIVER:-s3}
+  S3_ENDPOINT: http://garage:3900
+  S3_REGION: garage
+  S3_BUCKET: ${S3_BUCKET:-crm-photos}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?isi POSTGRES_PASSWORD}
+      POSTGRES_DB: maung_crm
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm -d maung_crm"]
+      interval: 5s
+      retries: 10
+
+  garage:
+    image: dxflrs/garage:v1.0.1
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?isi GARAGE_RPC_SECRET (openssl rand -hex 32)}
+    volumes:
+      - ./deploy/garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    # S3 API (3900) hanya di jaringan internal compose; tidak dipublikasikan ke host.
+
+  api:
+    image: ghcr.io/thuekx/maung-crm-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment: *api-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      garage: { condition: service_started }
+
+  web:
+    image: ghcr.io/thuekx/maung-crm-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+    ports: ["${WEB_PORT:-3100}:3000"]
+
+volumes:
+  pgdata:
+  garage_meta:
+  garage_data:

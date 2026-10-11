@@ -1,12 +1,12 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import multer from "multer";
-import path from "node:path";
 import { z } from "zod";
 import { audit, pool } from "./db.js";
 import { authenticate, isReviewer, requireCrm, WO_URL, type Principal } from "./auth.js";
 import { locationStatus, validCoords } from "./gps.js";
-import { MAX_BYTES, UPLOAD_DIR, compress, saveFile, sign, validateImage, verifySig } from "./files.js";
+import { storage } from "./storage.js";
+import { MAX_BYTES, compress, saveFile, sign, validateImage, verifySig } from "./files.js";
 
 const ACTIVITY_TYPES = ["CANVASSING", "MEETING", "FOLLOW_UP", "SURVEY", "PARTNERSHIP", "COMMUNITY_ENGAGEMENT", "LAINNYA"] as const;
 const SOURCES = ["LIVE", "EXIF", "UPLOAD", "MANUAL"] as const;
@@ -142,7 +142,7 @@ export function createApp() {
     if (!rel) throw fail(404, "Versi tidak tersedia");
     res.type(variant === "watermark" ? "image/jpeg" : p.mime);
     if (req.query.download) res.attachment(`foto-${id}-${variant}`);
-    res.sendFile(path.join(UPLOAD_DIR(), rel));
+    res.send(await storage().get(rel));
   }));
 
   app.use("/api", authenticate, requireCrm);
@@ -267,8 +267,8 @@ export function createApp() {
     const o = await validateImage(orig.buffer);
     const wm = files?.watermark?.[0];
     if (wm) await validateImage(wm.buffer);
-    const origRel = await saveFile(orig.buffer, o.ext);
-    const wmRel = wm ? await saveFile(await compress(wm.buffer), "jpg") : null;
+    const origRel = await saveFile(orig.buffer, o.ext, o.mime);
+    const wmRel = wm ? await saveFile(await compress(wm.buffer), "jpg", "image/jpeg") : null;
     const status = hasGps
       ? locationStatus({ lat: meta.lat, lng: meta.lng, accuracy: meta.accuracy, at: meta.gpsAt, source: meta.source }, meta.takenAt)
       : "UNVERIFIED";

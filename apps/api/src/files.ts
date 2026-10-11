@@ -1,9 +1,8 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { storage } from "./storage.js";
 import sharp from "sharp";
 
-export const UPLOAD_DIR = () => path.resolve(process.env.UPLOAD_DIR ?? "uploads");
 const SECRET = () => process.env.FILE_SIGN_SECRET ?? "dev-only-secret-ubah-di-produksi";
 export const MAX_BYTES = 15 * 1024 * 1024;
 const FORMATS = new Set(["jpeg", "png", "webp"]);
@@ -29,13 +28,11 @@ export async function validateImage(buf: Buffer) {
   return { mime: `image/${m.format}`, ext: m.format === "jpeg" ? "jpg" : m.format };
 }
 
-export async function saveFile(buf: Buffer, ext: string) {
+export async function saveFile(buf: Buffer, ext: string, mime: string) {
   const d = new Date();
-  const rel = path.join(String(d.getUTCFullYear()), String(d.getUTCMonth() + 1).padStart(2, "0"), `${randomUUID()}.${ext}`);
-  const abs = path.join(UPLOAD_DIR(), rel);
-  await mkdir(path.dirname(abs), { recursive: true });
-  await writeFile(abs, buf);
-  return rel;
+  const key = [String(d.getUTCFullYear()), String(d.getUTCMonth() + 1).padStart(2, "0"), `${randomUUID()}.${ext}`].join("/");
+  await storage().put(key, buf, mime);
+  return key;
 }
 
 /** Versi watermark dikompres (maks 2400px, JPEG q82); original disimpan apa adanya. */
