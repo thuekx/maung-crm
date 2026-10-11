@@ -18,13 +18,23 @@ const { pool } = await import("./db.js");
 
 before(async () => {
   wo = http.createServer((req, res) => {
+    const bodyChunks: Buffer[] = [];
+    req.on("data", (c) => bodyChunks.push(c));
     const t = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1] ?? "";
     if (req.url === "/api/auth/introspect") {
       const u = USERS[t];
       res.statusCode = u ? 200 : 401;
       return void res.end(JSON.stringify(u ?? { active: false }));
     }
-    if (req.url === "/api/auth/login") return void res.end(JSON.stringify({ token: "tNurman" }));
+    if (req.url === "/api/auth/login") {
+      // meniru kontrak WO asli: wajib { email, password }
+      return void req.on("end", () => {
+        const b = JSON.parse(Buffer.concat(bodyChunks).toString() || "{}");
+        if (typeof b.email !== "string" || !b.email || typeof b.password !== "string" || !b.password) { res.statusCode = 400; return void res.end(JSON.stringify({ error: "email wajib" })); }
+        if (b.password !== "benar") { res.statusCode = 401; return void res.end(JSON.stringify({ error: "Email atau password salah" })); }
+        res.end(JSON.stringify({ token: "tNurman", user: { email: b.email } }));
+      });
+    }
     res.statusCode = 404; res.end();
   });
   await new Promise<void>((r) => wo.listen(0, r));
@@ -55,8 +65,13 @@ async function photo(token: string, id: number, fields: Record<string, string>, 
 }
 
 test("login diteruskan ke WO; tanpa token 401; divisi lain 403", async () => {
-  const l = await call(null, "POST", "/api/auth/login", { username: "x", password: "y" });
+  // kontrak WO: { email, password }; klien lama { username } tetap dipetakan ke email
+  const l = await call(null, "POST", "/api/auth/login", { email: "nurman@l1v.local", password: "benar" });
   assert.equal((await l.json()).token, "tNurman");
+  const l2 = await call(null, "POST", "/api/auth/login", { username: "nurman", password: "benar" });
+  assert.equal(l2.status, 200);
+  assert.equal((await call(null, "POST", "/api/auth/login", { email: "nurman", password: "salah" })).status, 401);
+  assert.equal((await call(null, "POST", "/api/auth/login", {})).status, 400);
   assert.equal((await call(null, "GET", "/api/me")).status, 401);
   assert.equal((await call("salah", "GET", "/api/me")).status, 401);
   assert.equal((await call("tNoc", "GET", "/api/me")).status, 403);

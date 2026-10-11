@@ -124,8 +124,11 @@ export function createApp() {
 
   // Login terpusat: diteruskan ke Maung WO (tidak ada tabel user sendiri).
   app.post("/api/auth/login", ah(async (req, res) => {
+    // Kontrak login WO: { email, password } (email boleh berupa username). Terima juga { username } dari klien.
+    const b = (req.body ?? {}) as { email?: string; username?: string; password?: string };
     const r = await fetch(`${WO_URL()}/api/auth/login`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req.body ?? {}),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: b.email ?? b.username ?? "", password: b.password ?? "" }),
     });
     res.status(r.status).json(await r.json().catch(() => ({})));
   }));

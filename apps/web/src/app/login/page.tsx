@@ -15,7 +15,7 @@ export default function Login() {
     e.preventDefault();
     setBusy(true); setErr("");
     try {
-      const d = await api<{ token?: string; accessToken?: string }>("/auth/login", { method: "POST", json: { username, password } });
+      const d = await api<{ token?: string; accessToken?: string }>("/auth/login", { method: "POST", json: { email: username.trim(), password } });
       const t = d.token ?? d.accessToken;
       if (!t) throw new Error("Respons login tidak berisi token");
       setToken(t);
@@ -26,7 +26,7 @@ export default function Login() {
   return (
     <form onSubmit={submit} className="card mx-auto mt-16 max-w-sm space-y-3">
       <h1 className="text-lg font-semibold">Masuk dengan akun Maung WO</h1>
-      <div><label className="lbl">Username</label><input className="inp" value={username} onChange={(e) => setU(e.target.value)} autoComplete="username" required /></div>
+      <div><label className="lbl">Email atau username Maung WO</label><input className="inp" value={username} onChange={(e) => setU(e.target.value)} autoComplete="username" required /></div>
       <div>
         <label className="lbl">Password</label>
         <div className="flex gap-2">
