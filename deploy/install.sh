@@ -2,6 +2,7 @@
 # maung-crm — instalasi otomatis berfase (aman diulang, tidak menimpa .env, tidak menyentuh Maung WO).
 #   bash deploy/install.sh                    # penuh (7 fase)
 #   bash deploy/install.sh --check            # hanya fase 1-2 (guard + pemeriksaan WO, tanpa mengubah apa pun)
+#   bash deploy/install.sh --diag             # diagnosis stack CRM (baca-saja: status, healthcheck, log disamarkan)
 #   bash deploy/install.sh --env-only         # fase 1-3 (siapkan .env saja)
 #   opsi: --wo-url URL | --wo-vm | --standalone (izinkan host tanpa Maung WO) | env GHCR_TOKEN=... | CRM_EXPECT_HOST=nama-host
 set -uo pipefail
@@ -15,6 +16,7 @@ while [ $# -gt 0 ]; do
     --wo-vm) WO_VM=1; shift ;;
     --standalone) STANDALONE=1; shift ;;
     --check) MODE=check; shift ;;
+    --diag) MODE=diag; shift ;;
     --env-only) MODE=env; shift ;;
     *) echo "Opsi tidak dikenal: $1"; exit 1 ;;
   esac
@@ -30,6 +32,26 @@ line() { printf '%*s\n' 60 '' | tr ' ' '='; }
 phase() { P=$((P+1)); CUR="$1"; echo; echo "[$P/$TOTAL] $1"; }
 ok() { echo "✓ $*"; }
 warn() { echo "! $*"; WARNS+=("$*"); }
+mask() { sed -E 's#(://[^:/@ ]+:)[^@ ]+@#\1***@#g; s/((secret|password|token|passwd|key)[A-Za-z_]*[=:] *)[^ ,"]+/\1***/Ig'; }
+diag_crm() {
+  echo; echo "── DIAGNOSIS STACK CRM (baca-saja, secret disamarkan) ──"
+  echo "arsitektur_host=$(uname -m)"
+  for s in api web; do
+    img=$(dc config --images 2>/dev/null | grep "maung-crm-$s" | head -1)
+    [ -n "$img" ] && echo "arsitektur_image_$s=$(docker image inspect -f '{{.Architecture}}/{{.Os}}' "$img" 2>/dev/null)"
+  done
+  dc ps -a --format 'table {{.Service}}\t{{.Status}}' 2>&1
+  cid=$(dc ps -aq api 2>/dev/null | head -1)
+  if [ -n "$cid" ]; then
+    echo "api_state: $(docker inspect -f 'restart={{.RestartCount}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} status={{.State.Status}}' "$cid" 2>/dev/null)"
+    echo "api_healthcheck_terakhir:"
+    docker inspect -f '{{range .State.Health.Log}}{{println .ExitCode .Output}}{{end}}' "$cid" 2>/dev/null | tail -4 | cut -c1-300 | sed 's/^/  /'
+  fi
+  for s in api postgres garage; do
+    echo "log_$s (30 baris terakhir):"; dc logs --no-color --tail 30 "$s" 2>&1 | mask | sed 's/^/  /'
+  done
+  echo "── akhir diagnosis ──"
+}
 wo_snapshot() {
   echo "wo_status_saat_ini (baca-saja):"
   if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
@@ -86,6 +108,12 @@ WEB_PORT_CUR="${WEB_PORT_CUR:-3100}"
 if (ss -ltn 2>/dev/null || true) | grep -qE "[:.]$WEB_PORT_CUR[[:space:]]"; then
   if [ "$DOCKER_OK" = 1 ] && dc ps -q web 2>/dev/null | grep -q .; then ok "port $WEB_PORT_CUR dipakai stack CRM ini (pembaruan)"; else warn "port $WEB_PORT_CUR sudah dipakai proses lain"; fi
 else ok "port $WEB_PORT_CUR bebas"; fi
+
+if [ "$MODE" = diag ]; then
+  [ "$DOCKER_OK" = 1 ] || die "docker tidak dapat diakses"
+  diag_crm
+  echo; line; echo "RESULT"; line; echo "CRM_DIAG=DONE"; echo "perubahan_ke_sistem=TIDAK_ADA"; wo_snapshot; echo "audit_log=$LOG"; exit 0
+fi
 
 # ───────────────────────── 2. Pemeriksaan Maung WO (baca-saja) ─────────────────────────
 phase "Pemeriksaan Maung WO (baca-saja, tidak mengubah apa pun)"
@@ -169,10 +197,12 @@ ok "image api & web siap"
 
 # ───────────────────────── 5. Jalankan stack ─────────────────────────
 phase "Jalankan stack (postgres, garage, api, web)"
-dc up -d 2>&1 | sed 's/^/  /' ; [ "${PIPESTATUS[0]}" = 0 ] || die "docker compose up gagal"
+dc up -d >"$LOGDIR/.up.out" 2>&1; UPRC=$?
+sed 's/^/  /' "$LOGDIR/.up.out"
+if [ "$UPRC" != 0 ]; then diag_crm; die "docker compose up gagal (lihat DIAGNOSIS di atas)"; fi
 for _ in $(seq 1 40); do h=$(dc ps --format '{{.Health}}' api 2>/dev/null); [ "$h" = healthy ] && break; sleep 3; done
 dc ps --format 'table {{.Service}}\t{{.Status}}'
-[ "$(dc ps --format '{{.Health}}' api 2>/dev/null)" = healthy ] && ok "api healthy" || { dc logs --tail 25 api; die "api tidak healthy dalam 2 menit (log di atas)"; }
+[ "$(dc ps --format '{{.Health}}' api 2>/dev/null)" = healthy ] && ok "api healthy" || { diag_crm; die "api tidak healthy dalam 2 menit (lihat DIAGNOSIS di atas)"; }
 
 # ───────────────────────── 6. Garage ─────────────────────────
 phase "Inisialisasi Garage (layout, bucket, kunci)"
