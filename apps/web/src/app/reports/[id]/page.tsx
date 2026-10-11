@@ -1,6 +1,6 @@
 "use client";
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { ACTIVITY_TYPES, api, fmtDate, getToken } from "@/lib/api";
+import { ACTIVITY_TYPES, api, fmtDate } from "@/lib/api";
 import { readGps, watermark } from "@/lib/photo";
 import ReportForm from "@/components/ReportForm";
 

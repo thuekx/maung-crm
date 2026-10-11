@@ -1,4 +1,4 @@
-// Uji integrasi: Postgres sungguhan + Maung WO tiruan (introspect/login).
+// Uji integrasi: Postgres sungguhan + Maung WO tiruan (GET /api/auth/me). API CRM di bawah /crm/api.
 process.env.DATABASE_URL ??= "postgresql://postgres@localhost:5432/maung_crm_test";
 process.env.UPLOAD_DIR = "/tmp/maung-crm-test-uploads";
 import test, { after, before } from "node:test";
@@ -8,32 +8,24 @@ import type { AddressInfo } from "node:net";
 import sharp from "sharp";
 
 const USERS: Record<string, any> = {
-  tNurman: { active: true, sub: "u-nurman", name: "Nurman", role: "MKT", subRole: "STAFF" },
-  tRasyad: { active: true, sub: "u-rasyad", name: "Rasyad", role: "MKT", subRole: "STAFF" },
-  tMgr: { active: true, sub: "u-mgr", name: "Manajer", role: "MKT", subRole: "MANAGER" },
-  tNoc: { active: true, sub: "u-noc", name: "Noc", role: "NOC", subRole: "STAFF" },
+  tNurman: { id: "u-nurman", name: "Nurman", email: "nurman@l1v.local", role: "MKT", subRole: "STAFF", features: ["app.crm", "wo.view"] },
+  tRasyad: { id: "u-rasyad", name: "Rasyad", email: "rasyad@l1v.local", role: "MKT", subRole: "STAFF", features: ["app.crm"] },
+  tMgr: { id: "u-mgr", name: "Manajer", email: "mgr@l1v.local", role: "MKT", subRole: "MANAGER", features: ["app.crm"] },
+  tNoc: { id: "u-noc", name: "Noc", email: "noc@l1v.local", role: "NOC", subRole: "STAFF", features: ["wo.view"] },
+  tMktTanpaAkses: { id: "u-mkt2", name: "Mkt Baru", email: "mkt2@l1v.local", role: "MKT", subRole: "STAFF", features: [] },
+  tFin: { id: "u-fin", name: "Fin", email: "fin@l1v.local", role: "FIN", subRole: "STAFF", features: ["app.crm"] },
+  tAdmin: { id: "u-admin", name: "Admin", email: "admin@l1v.local", role: "ADMIN", subRole: "STAFF", features: [] },
 };
 let wo: http.Server, api: http.Server, base = "";
 const { pool } = await import("./db.js");
 
 before(async () => {
   wo = http.createServer((req, res) => {
-    const bodyChunks: Buffer[] = [];
-    req.on("data", (c) => bodyChunks.push(c));
     const t = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1] ?? "";
-    if (req.url === "/api/auth/introspect") {
+    if (req.url === "/api/auth/me") {
       const u = USERS[t];
       res.statusCode = u ? 200 : 401;
-      return void res.end(JSON.stringify(u ?? { active: false }));
-    }
-    if (req.url === "/api/auth/login") {
-      // meniru kontrak WO asli: wajib { email, password }
-      return void req.on("end", () => {
-        const b = JSON.parse(Buffer.concat(bodyChunks).toString() || "{}");
-        if (typeof b.email !== "string" || !b.email || typeof b.password !== "string" || !b.password) { res.statusCode = 400; return void res.end(JSON.stringify({ error: "email wajib" })); }
-        if (b.password !== "benar") { res.statusCode = 401; return void res.end(JSON.stringify({ error: "Email atau password salah" })); }
-        res.end(JSON.stringify({ token: "tNurman", user: { email: b.email } }));
-      });
+      return void res.end(JSON.stringify(u ?? { error: "Belum login" }));
     }
     res.statusCode = 404; res.end();
   });
@@ -61,28 +53,34 @@ async function photo(token: string, id: number, fields: Record<string, string>, 
   f.set("original", new Blob([new Uint8Array(buf ?? (await png()))]), "o.png");
   if (wm) f.set("watermark", new Blob([new Uint8Array(await png("#993366"))]), "w.png");
   for (const [k, v] of Object.entries(fields)) f.set(k, v);
-  return fetch(`${base}/api/reports/${id}/photos`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: f });
+  return fetch(`${base}/crm/api/reports/${id}/photos`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: f });
 }
 
-test("login diteruskan ke WO; tanpa token 401; divisi lain 403", async () => {
-  // kontrak WO: { email, password }; klien lama { username } tetap dipetakan ke email
-  const l = await call(null, "POST", "/api/auth/login", { email: "nurman@l1v.local", password: "benar" });
-  assert.equal((await l.json()).token, "tNurman");
-  const l2 = await call(null, "POST", "/api/auth/login", { username: "nurman", password: "benar" });
-  assert.equal(l2.status, 200);
-  assert.equal((await call(null, "POST", "/api/auth/login", { email: "nurman", password: "salah" })).status, 401);
-  assert.equal((await call(null, "POST", "/api/auth/login", {})).status, 400);
-  assert.equal((await call(null, "GET", "/api/me")).status, 401);
-  assert.equal((await call("salah", "GET", "/api/me")).status, 401);
-  assert.equal((await call("tNoc", "GET", "/api/me")).status, 403);
-  const me = await (await call("tMgr", "GET", "/api/me")).json();
-  assert.equal(me.reviewer, true);
-  await call("tRasyad", "GET", "/api/me"); // mengisi cache PIC
+test("auth lewat /api/auth/me WO; gerbang app.crm; tanpa token 401", async () => {
+  assert.equal((await call(null, "GET", "/crm/api/me")).status, 401);
+  assert.equal((await call("salah", "GET", "/crm/api/me")).status, 401);
+  assert.equal((await call("tNoc", "GET", "/crm/api/me")).status, 403); // tanpa fitur app.crm
+  const gagal = await call("tMktTanpaAkses", "GET", "/crm/api/me"); // MKT tapi belum diberi hak "Aplikasi: CRM"
+  assert.equal(gagal.status, 403);
+  assert.match((await gagal.json()).error, /Hak Akses/);
+  const me = await (await call("tMgr", "GET", "/crm/api/me")).json();
+  assert.equal(me.reviewer, true); assert.ok(me.features.includes("app.crm"));
+  assert.equal((await call("tAdmin", "GET", "/crm/api/me")).status, 200); // ADMIN selalu boleh
+  assert.equal((await (await call("tFin", "GET", "/crm/api/me")).json()).reviewer, false); // fitur ada, bukan reviewer
+  await call("tRasyad", "GET", "/crm/api/me"); // mengisi cache PIC
+});
+
+test("rute lama /api/* bukan milik CRM (milik WO) → 404", async () => {
+  assert.equal((await call("tNurman", "GET", "/api/me")).status, 404);
+  assert.equal((await call(null, "POST", "/api/auth/login", { email: "x", password: "y" })).status, 404);
+  const h = await fetch(base + "/crm/api/health");
+  assert.equal(h.status, 200);
+  assert.equal(h.headers.get("x-content-type-options"), "nosniff");
 });
 
 let rid = 0;
 test("report multi-PIC dengan banyak hasil diskusi", async () => {
-  const r = await call("tNurman", "POST", "/api/reports", {
+  const r = await call("tNurman", "POST", "/crm/api/reports", {
     activityType: "CANVASSING", counterpart: "Pengurus BUMDes", area: "Panundaan", summary: "Kunjungan BUMDes",
     picIds: ["u-nurman", "u-rasyad"],
     items: { discussion: ["a", "b", "c"], agreement: ["fee sampai Juni"], issues: [] },
@@ -93,28 +91,35 @@ test("report multi-PIC dengan banyak hasil diskusi", async () => {
   assert.deepEqual(d.pics.map((p: any) => p.name), ["Nurman", "Rasyad"]);
   assert.equal(d.items.discussion.length, 3);
   assert.equal(d.checkin, null);
-  assert.equal((await call("tNurman", "POST", "/api/reports", { activityType: "X" })).status, 400);
-  assert.equal((await call("tNurman", "POST", "/api/reports", { activityType: "SURVEY", picIds: ["tidak-ada"] })).status, 400);
+  assert.equal((await call("tNurman", "POST", "/crm/api/reports", { activityType: "X" })).status, 400);
+  assert.equal((await call("tNurman", "POST", "/crm/api/reports", { activityType: "SURVEY", picIds: ["tidak-ada"] })).status, 400);
 });
 
 test("RBAC: staff lain tidak melihat; PIC & reviewer melihat", async () => {
-  const solo = await (await call("tNurman", "POST", "/api/reports", { activityType: "SURVEY" })).json();
-  assert.equal((await call("tRasyad", "GET", `/api/reports/${solo.id}`)).status, 403);
-  assert.equal((await call("tRasyad", "GET", `/api/reports/${rid}`)).status, 200);
-  assert.equal((await call("tMgr", "GET", `/api/reports/${solo.id}`)).status, 200);
-  const list = await (await call("tRasyad", "GET", "/api/reports")).json();
+  const solo = await (await call("tNurman", "POST", "/crm/api/reports", { activityType: "SURVEY" })).json();
+  assert.equal((await call("tRasyad", "GET", `/crm/api/reports/${solo.id}`)).status, 403);
+  assert.equal((await call("tRasyad", "GET", `/crm/api/reports/${rid}`)).status, 200);
+  assert.equal((await call("tMgr", "GET", `/crm/api/reports/${solo.id}`)).status, 200);
+  const list = await (await call("tRasyad", "GET", "/crm/api/reports")).json();
   assert.ok(list.every((x: any) => x.id !== solo.id));
+});
+
+test("cakupan data: FIN ber-app.crm bukan reviewer → tidak melihat report orang lain; ADMIN melihat semua", async () => {
+  const list = await (await call("tFin", "GET", "/crm/api/reports")).json();
+  assert.equal(list.length, 0);
+  assert.equal((await call("tFin", "GET", `/crm/api/reports/${rid}`)).status, 403);
+  assert.ok((await (await call("tAdmin", "GET", "/crm/api/reports")).json()).length >= 1);
 });
 
 test("check-in LIVE → VERIFIED; MANUAL → UNVERIFIED; audit mencatat perubahan lokasi", async () => {
   const live = { lat: -7.1, lng: 107.4, accuracy: 8, at: new Date().toISOString(), source: "LIVE" };
-  assert.equal((await (await call("tNurman", "POST", `/api/reports/${rid}/checkin`, live)).json()).locationStatus, "VERIFIED");
-  assert.equal((await (await call("tNurman", "POST", `/api/reports/${rid}/checkin`, { ...live, source: "MANUAL" })).json()).locationStatus, "UNVERIFIED");
-  assert.equal((await call("tNurman", "POST", `/api/reports/${rid}/checkin`, { ...live, lat: 999 })).status, 400);
+  assert.equal((await (await call("tNurman", "POST", `/crm/api/reports/${rid}/checkin`, live)).json()).locationStatus, "VERIFIED");
+  assert.equal((await (await call("tNurman", "POST", `/crm/api/reports/${rid}/checkin`, { ...live, source: "MANUAL" })).json()).locationStatus, "UNVERIFIED");
+  assert.equal((await call("tNurman", "POST", `/crm/api/reports/${rid}/checkin`, { ...live, lat: 999 })).status, 400);
   const a = await pool.query("SELECT * FROM audit_log WHERE entity='field_report' AND entity_id=$1 AND action='CHECKIN' ORDER BY id", [rid]);
   assert.equal(a.rowCount, 2);
   assert.equal(a.rows[1].before.source, "LIVE");
-  await call("tNurman", "POST", `/api/reports/${rid}/checkin`, live);
+  await call("tNurman", "POST", `/crm/api/reports/${rid}/checkin`, live);
 });
 
 test("foto: live tersimpan lengkap; galeri tanpa GPS UNVERIFIED; GPS dikarang ditolak; bukan gambar ditolak", async () => {
@@ -129,7 +134,7 @@ test("foto: live tersimpan lengkap; galeri tanpa GPS UNVERIFIED; GPS dikarang di
   assert.equal((await photo("tNurman", rid, { lat: "1", lng: "1" })).status, 400);
   assert.equal((await photo("tNurman", rid, { takenAt: now }, Buffer.from("<html>bukan gambar</html>"))).status, 400);
 
-  const d = await (await call("tMgr", "GET", `/api/reports/${rid}`)).json();
+  const d = await (await call("tMgr", "GET", `/crm/api/reports/${rid}`)).json();
   assert.equal(d.photos.length, 3);
   const p = d.photos.find((x: any) => x.caption === "BUMDes");
   assert.equal(p.lat, -7.1); assert.equal(p.accuracy, 8); assert.equal(p.source, "LIVE");
@@ -138,39 +143,39 @@ test("foto: live tersimpan lengkap; galeri tanpa GPS UNVERIFIED; GPS dikarang di
   assert.equal(w.headers.get("content-type"), "image/jpeg");
   assert.notDeepEqual(Buffer.from(await o.arrayBuffer()), Buffer.from(await w.arrayBuffer()));
   assert.equal((await fetch(base + p.originalUrl.replace(/sig=.{4}/, "sig=0000"))).status, 403);
-  assert.equal((await fetch(base + `/api/photos/${p.id}/file?variant=original`)).status, 403);
+  assert.equal((await fetch(base + `/crm/api/photos/${p.id}/file?variant=original`)).status, 403);
 });
 
 test("Map View hanya koordinat valid; staff hanya miliknya", async () => {
-  const m = await (await call("tRasyad", "GET", "/api/map")).json();
+  const m = await (await call("tRasyad", "GET", "/crm/api/map")).json();
   assert.equal(m.reports.length, 1);
   assert.equal(m.photos.length, 2); // galeri tanpa GPS tidak muncul
   assert.ok(m.photos.every((p: any) => typeof p.lat === "number"));
 });
 
 test("follow-up task wajib PIC & due date; overdue; status", async () => {
-  assert.equal((await call("tNurman", "POST", `/api/reports/${rid}/tasks`, { title: "Hitung fee" })).status, 400);
-  const t = await call("tNurman", "POST", `/api/reports/${rid}/tasks`, { title: "Kirim proposal", picUserId: "u-rasyad", dueDate: "2020-01-01" });
+  assert.equal((await call("tNurman", "POST", `/crm/api/reports/${rid}/tasks`, { title: "Hitung fee" })).status, 400);
+  const t = await call("tNurman", "POST", `/crm/api/reports/${rid}/tasks`, { title: "Kirim proposal", picUserId: "u-rasyad", dueDate: "2020-01-01" });
   assert.equal(t.status, 201);
-  const mine = await (await call("tRasyad", "GET", "/api/tasks")).json();
+  const mine = await (await call("tRasyad", "GET", "/crm/api/tasks")).json();
   assert.equal(mine.length, 1); assert.equal(mine[0].overdue, true);
   const id = mine[0].id;
-  assert.equal((await call("tRasyad", "PATCH", `/api/tasks/${id}`, { status: "DONE" })).status, 200);
-  assert.equal((await (await call("tRasyad", "GET", "/api/tasks")).json())[0].overdue, false);
+  assert.equal((await call("tRasyad", "PATCH", `/crm/api/tasks/${id}`, { status: "DONE" })).status, 200);
+  assert.equal((await (await call("tRasyad", "GET", "/crm/api/tasks")).json())[0].overdue, false);
 });
 
 test("submit: wajib summary, lalu terkunci", async () => {
-  const empty = await (await call("tNurman", "POST", "/api/reports", { activityType: "MEETING" })).json();
-  assert.equal((await call("tNurman", "POST", `/api/reports/${empty.id}/submit`)).status, 400);
-  const s = await call("tNurman", "POST", `/api/reports/${rid}/submit`);
+  const empty = await (await call("tNurman", "POST", "/crm/api/reports", { activityType: "MEETING" })).json();
+  assert.equal((await call("tNurman", "POST", `/crm/api/reports/${empty.id}/submit`)).status, 400);
+  const s = await call("tNurman", "POST", `/crm/api/reports/${rid}/submit`);
   assert.equal((await s.json()).status, "SUBMITTED");
-  assert.equal((await call("tNurman", "PUT", `/api/reports/${rid}`, { activityType: "MEETING" })).status, 409);
-  assert.equal((await call("tNurman", "POST", `/api/reports/${rid}/checkin`, { lat: 1, lng: 1, at: new Date().toISOString(), source: "LIVE" })).status, 409);
+  assert.equal((await call("tNurman", "PUT", `/crm/api/reports/${rid}`, { activityType: "MEETING" })).status, 409);
+  assert.equal((await call("tNurman", "POST", `/crm/api/reports/${rid}/checkin`, { lat: 1, lng: 1, at: new Date().toISOString(), source: "LIVE" })).status, 409);
 });
 
 test("soft delete", async () => {
-  const d = await (await call("tNurman", "POST", "/api/reports", { activityType: "SURVEY" })).json();
-  assert.equal((await call("tNurman", "DELETE", `/api/reports/${d.id}`)).status, 204);
-  assert.equal((await call("tNurman", "GET", `/api/reports/${d.id}`)).status, 404);
+  const d = await (await call("tNurman", "POST", "/crm/api/reports", { activityType: "SURVEY" })).json();
+  assert.equal((await call("tNurman", "DELETE", `/crm/api/reports/${d.id}`)).status, 204);
+  assert.equal((await call("tNurman", "GET", `/crm/api/reports/${d.id}`)).status, 404);
   assert.equal((await pool.query("SELECT 1 FROM field_reports WHERE id=$1", [d.id])).rowCount, 1);
 });

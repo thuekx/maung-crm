@@ -35,3 +35,6 @@ Keputusan terbuka untuk pemilik: lokasi object storage (MinIO/Garage vs volume),
 - Minta pemilik mengetik/menjalankan perintah manual hanya bila benar-benar tidak mungkin (mis. token GitHub untuk repo private); jelaskan alasannya.
 - **Jangan minta pemilik mengubah/menyunting skrip** (mis. "ubah baris pertama", "isi variabel ini", "ganti nama host"). Selalu berikan **skrip UTUH yang siap tempel dan jalankan** setiap kali ada perubahan; bila ada mode berbeda (mis. diagnosis), sediakan sebagai blok utuh terpisah atau jadikan perilaku bawaan. Alasan: sunting manual rawan salah.
 
+## Arsitektur terbaru (menggantikan "CRM berdiri sendiri")
+Satu domain, satu login (Maung WO), CRM di jalur `/crm` pada VM yang sama; Caddy milik WO; `crm-web`/`crm-api` di jaringan `maung_edge`; API CRM di `/crm/api` (port 4000); token = `maung_token`; akses = fitur WO `app.crm` + cakupan peran; data pelanggan lewat Export API WO (cermin baca-saja). Detail dan tahap: `docs/RENCANA-INTEGRASI-WO.md`; kontrak sisi WO: `docs/maung-crm/INTEGRASI-WO.md` di repo Maung-Wo-Inv. Satu repo satu penulis: sesi CRM hanya menulis di repo ini.
+

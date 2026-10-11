@@ -1,6 +1,6 @@
 # Rencana integrasi maung-crm ↔ Maung WO (jalur satu domain)
 
-Sumber kebenaran sisi WO: `docs/maung-crm/INTEGRASI-WO.md` di repo Maung-Wo-Inv (dibaca HEAD `b864723`). Dokumen ini = rencana sisi CRM. Status: **MENUNGGU PERSETUJUAN PEMILIK** (belum ada kode yang diubah).
+Sumber kebenaran sisi WO: `docs/maung-crm/INTEGRASI-WO.md` di repo Maung-Wo-Inv (dibaca HEAD `b864723`). Dokumen ini = rencana sisi CRM. Status: rencana **DISETUJUI**; overlay Caddy sendiri dihapus. **Tahap 1 (kode) SELESAI** — menunggu persetujuan pemilik sebelum Tahap 2. Catatan implementasi Tahap 1: CSP dasar (produksi) + header keamanan, popup peta dirakit dari node DOM (bukan HTML), `cors` dihapus (satu origin).
 Prinsip: satu repo satu penulis (sesi CRM hanya menulis di repo ini; sesi WO hanya di repo WO; saling membaca lewat berkas di `main`).
 
 ## Keputusan pemilik (dicatat)

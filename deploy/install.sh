@@ -74,6 +74,8 @@ line; echo "MAUNG-CRM INSTALL"; echo "HOST=$(hostname)  MODE=$MODE  WO_VM=$WO_VM
 
 # ───────────────────────── 1. Guard direktori & lingkungan ─────────────────────────
 phase "Guard direktori & lingkungan"
+# Pengaman transisi: image terbaru memakai jalur /crm (Tahap 1); compose & skrip ini baru disesuaikan di Tahap 2–3.
+if [ "${CRM_ALLOW_LEGACY:-0}" != 1 ]; then die "install.sh versi lama DINONAKTIFKAN sementara: kode sudah pindah ke jalur /crm (docs/RENCANA-INTEGRASI-WO.md), compose/skrip belum disesuaikan (Tahap 2–3). Tidak ada yang diubah. Deployment uji yang berjalan tidak terpengaruh."; fi
 echo "pwd=$ROOT"; echo "user=$(id -un)"; echo "log=$LOG"
 grep -q '^name: maung-crm' docker-compose.yml 2>/dev/null || die "bukan direktori maung-crm (docker-compose.yml tidak sesuai)"
 ok "direktori adalah repo maung-crm"

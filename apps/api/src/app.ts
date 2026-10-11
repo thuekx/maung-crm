@@ -1,9 +1,9 @@
 import express, { type NextFunction, type Request, type Response } from "express";
-import cors from "cors";
 import multer from "multer";
 import { z } from "zod";
 import { audit, pool } from "./db.js";
-import { authenticate, isReviewer, requireCrm, WO_URL, type Principal } from "./auth.js";
+import { authenticate, isReviewer, requireCrm, type Principal } from "./auth.js";
+import { API_BASE } from "./config.js";
 import { locationStatus, validCoords } from "./gps.js";
 import { storage } from "./storage.js";
 import { MAX_BYTES, compress, saveFile, sign, validateImage, verifySig } from "./files.js";
@@ -116,25 +116,21 @@ async function detail(row: any) {
 
 export function createApp() {
   const app = express();
-  app.use(cors());
+  app.disable("x-powered-by");
+  // Semua rute CRM di bawah API_BASE (/crm/api); /api dan /uploads di domain bersama milik WO.
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; sandbox");
+    next();
+  });
   app.use(express.json({ limit: "1mb" }));
+  const r = express.Router();
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_BYTES, files: 2 } });
 
-  app.get("/api/health", (_req, res) => res.json({ ok: true }));
-
-  // Login terpusat: diteruskan ke Maung WO (tidak ada tabel user sendiri).
-  app.post("/api/auth/login", ah(async (req, res) => {
-    // Kontrak login WO: { email, password } (email boleh berupa username). Terima juga { username } dari klien.
-    const b = (req.body ?? {}) as { email?: string; username?: string; password?: string };
-    const r = await fetch(`${WO_URL()}/api/auth/login`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: b.email ?? b.username ?? "", password: b.password ?? "" }),
-    });
-    res.status(r.status).json(await r.json().catch(() => ({})));
-  }));
+  r.get("/health", (_req, res) => res.json({ ok: true }));
 
   // Berkas foto memakai signed URL (img tag tidak bisa kirim header Authorization).
-  app.get("/api/photos/:id/file", ah(async (req, res) => {
+  r.get("/photos/:id/file", ah(async (req, res) => {
     const id = idParam(req);
     const variant = req.query.variant === "watermark" ? "watermark" : "original";
     if (!verifySig(id, variant, Number(req.query.exp), String(req.query.sig ?? ""))) throw fail(403, "Tautan tidak valid atau kedaluwarsa");
@@ -148,16 +144,16 @@ export function createApp() {
     res.send(await storage().get(rel));
   }));
 
-  app.use("/api", authenticate, requireCrm);
+  r.use(authenticate, requireCrm);
 
-  app.get("/api/me", (req, res) => res.json({ ...req.user, reviewer: isReviewer(req.user!) }));
+  r.get("/me", (req, res) => res.json({ ...req.user, reviewer: isReviewer(req.user!) }));
 
-  app.get("/api/pics", ah(async (_req, res) => {
+  r.get("/pics", ah(async (_req, res) => {
     const r = await pool.query("SELECT user_id AS id, name FROM wo_user_cache WHERE role IN ('MKT','ADMIN') ORDER BY name");
     res.json(r.rows);
   }));
 
-  app.post("/api/reports", ah(async (req, res) => {
+  r.post("/reports", ah(async (req, res) => {
     const u = req.user!;
     const b = reportSchema.parse(req.body);
     const picIds = b.picIds?.length ? b.picIds : [u.id];
@@ -178,7 +174,7 @@ export function createApp() {
     } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
   }));
 
-  app.get("/api/reports", ah(async (req, res) => {
+  r.get("/reports", ah(async (req, res) => {
     const u = req.user!;
     const where = ["r.deleted_at IS NULL"];
     const args: unknown[] = [];
@@ -196,11 +192,11 @@ export function createApp() {
     res.json(r.rows);
   }));
 
-  app.get("/api/reports/:id", ah(async (req, res) => {
+  r.get("/reports/:id", ah(async (req, res) => {
     res.json(await detail(await loadReport(idParam(req), req.user!)));
   }));
 
-  app.put("/api/reports/:id", ah(async (req, res) => {
+  r.put("/reports/:id", ah(async (req, res) => {
     const u = req.user!, id = idParam(req);
     const row = await loadReport(id, u);
     editable(row);
@@ -221,7 +217,7 @@ export function createApp() {
     res.json(await detail(await loadReport(id, u)));
   }));
 
-  app.delete("/api/reports/:id", ah(async (req, res) => {
+  r.delete("/reports/:id", ah(async (req, res) => {
     const u = req.user!, id = idParam(req);
     const row = await loadReport(id, u);
     if (row.created_by !== u.id && !isReviewer(u)) throw fail(403, "Hanya pembuat/reviewer yang boleh menghapus");
@@ -232,7 +228,7 @@ export function createApp() {
   }));
 
   // GPS check-in: koordinat dari klien (Geolocation saat check-in). Perubahan lokasi selalu masuk audit log.
-  app.post("/api/reports/:id/checkin", ah(async (req, res) => {
+  r.post("/reports/:id/checkin", ah(async (req, res) => {
     const u = req.user!, id = idParam(req);
     const row = await loadReport(id, u);
     editable(row);
@@ -247,7 +243,7 @@ export function createApp() {
     res.json({ locationStatus: status });
   }));
 
-  app.post("/api/reports/:id/photos", upload.fields([{ name: "original", maxCount: 1 }, { name: "watermark", maxCount: 1 }]), ah(async (req, res) => {
+  r.post("/reports/:id/photos", upload.fields([{ name: "original", maxCount: 1 }, { name: "watermark", maxCount: 1 }]), ah(async (req, res) => {
     const u = req.user!, id = idParam(req);
     editable(await loadReport(id, u));
     const files = req.files as Record<string, Express.Multer.File[]> | undefined;
@@ -285,7 +281,7 @@ export function createApp() {
     res.status(201).json({ id: r.rows[0].id, locationStatus: status });
   }));
 
-  app.delete("/api/reports/:id/photos/:photoId", ah(async (req, res) => {
+  r.delete("/reports/:id/photos/:photoId", ah(async (req, res) => {
     const u = req.user!, id = idParam(req);
     editable(await loadReport(id, u));
     const r = await pool.query("UPDATE field_photos SET deleted_at=now() WHERE id=$1 AND report_id=$2 AND deleted_at IS NULL RETURNING id", [Number(req.params.photoId), id]);
@@ -294,7 +290,7 @@ export function createApp() {
     res.status(204).end();
   }));
 
-  app.post("/api/reports/:id/submit", ah(async (req, res) => {
+  r.post("/reports/:id/submit", ah(async (req, res) => {
     const u = req.user!, id = idParam(req);
     const row = await loadReport(id, u);
     editable(row);
@@ -305,7 +301,7 @@ export function createApp() {
   }));
 
   // Follow-up task: wajib PIC & due date.
-  app.post("/api/reports/:id/tasks", ah(async (req, res) => {
+  r.post("/reports/:id/tasks", ah(async (req, res) => {
     const u = req.user!, id = idParam(req);
     await loadReport(id, u);
     const t = taskSchema.parse(req.body);
@@ -318,7 +314,7 @@ export function createApp() {
     res.status(201).json({ id: r.rows[0].id });
   }));
 
-  app.patch("/api/tasks/:id", ah(async (req, res) => {
+  r.patch("/tasks/:id", ah(async (req, res) => {
     const u = req.user!, id = idParam(req);
     const { status } = z.object({ status: z.enum(["OPEN", "DONE"]) }).parse(req.body);
     const t = await pool.query("SELECT report_id, pic_user_id, status FROM field_tasks WHERE id=$1 AND deleted_at IS NULL", [id]);
@@ -329,7 +325,7 @@ export function createApp() {
     res.json({ id, status });
   }));
 
-  app.get("/api/tasks", ah(async (req, res) => {
+  r.get("/tasks", ah(async (req, res) => {
     const u = req.user!;
     const mine = !isReviewer(u) || req.query.mine === "1";
     const r = await pool.query(
@@ -340,7 +336,7 @@ export function createApp() {
   }));
 
   // Map View: hanya koordinat valid; titik report (check-in) dan foto.
-  app.get("/api/map", ah(async (req, res) => {
+  r.get("/map", ah(async (req, res) => {
     const u = req.user!;
     const scope = isReviewer(u) ? "" : "AND (r.created_by=$1 OR EXISTS (SELECT 1 FROM field_report_pics p WHERE p.report_id=r.id AND p.user_id=$1))";
     const args = isReviewer(u) ? [] : [u.id];
@@ -359,6 +355,8 @@ export function createApp() {
       photos: photos.rows.map((p) => ({ ...p, thumbUrl: sign(p.id, "watermark") })),
     });
   }));
+
+  app.use(API_BASE, r);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof z.ZodError) return void res.status(400).json({ error: "Data tidak valid", detail: err.issues });

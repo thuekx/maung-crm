@@ -1,6 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { storage } from "./storage.js";
+import { API_BASE } from "./config.js";
 import sharp from "sharp";
 
 const SECRET = () => process.env.FILE_SIGN_SECRET ?? "dev-only-secret-ubah-di-produksi";
@@ -10,7 +11,7 @@ const FORMATS = new Set(["jpeg", "png", "webp"]);
 export function sign(id: number, variant: string, ttlSec = 600) {
   const exp = Math.floor(Date.now() / 1000) + ttlSec;
   const sig = createHmac("sha256", SECRET()).update(`${id}.${variant}.${exp}`).digest("hex");
-  return `/api/photos/${id}/file?variant=${variant}&exp=${exp}&sig=${sig}`;
+  return `${API_BASE}/photos/${id}/file?variant=${variant}&exp=${exp}&sig=${sig}`;
 }
 
 export function verifySig(id: number, variant: string, exp: number, sig: string) {

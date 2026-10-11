@@ -1,3 +1,5 @@
+> ⚠️ **SEDANG DIROMBAK (integrasi jalur satu domain `/crm`, lihat `docs/RENCANA-INTEGRASI-WO.md`).** Tahap 1 (kode) selesai: image baru memakai `basePath /crm`, API di `/crm/api` port 4000, tanpa halaman login. **Compose dan skrip di bawah belum disesuaikan (Tahap 2–3) — jangan jalankan `install.sh`/`bootstrap.sh` terhadap image `latest` terbaru.** Untuk menahan deployment uji yang sudah berjalan: set `IMAGE_TAG=0c467c861404dc1076d3f501fc2a1b262e56c5ef` di `.env` CRM sebelum `docker compose pull`. Overlay Caddy sendiri sudah dihapus (CRM tidak menjalankan proxy).
+
 # Deploy maung-crm (image siap tarik)
 
 Image dibangun otomatis oleh GitHub Actions (`.github/workflows/ci.yml`) setiap push ke `main` yang lulus tes, lalu di-push ke GHCR:

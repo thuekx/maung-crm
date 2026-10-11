@@ -18,8 +18,9 @@ Deploy (image GHCR, Garage, PostGIS, CI): lihat [`docs/DEPLOY.md`](docs/DEPLOY.m
 npm install
 createdb maung_crm            # PostgreSQL 16
 cp apps/api/.env.example apps/api/.env   # atur DATABASE_URL, WO_URL
-npm start -w apps/api         # :4100, migrasi otomatis
-npm run build -w apps/web && npm start -w apps/web   # :3100, /api diproksikan ke API_URL
+PORT=4100 npm start -w apps/api   # API di /crm/api, migrasi otomatis (image produksi: port 4000)
+API_URL=http://localhost:4100 npm run build -w apps/web && npm start -w apps/web   # :3100/crm — rewrite /crm/api → API hanya jika API_URL diisi (produksi: Caddy)
 npm test                      # butuh DB maung_crm_test
+# Tanpa login sendiri: token Maung WO dibaca dari localStorage `maung_token` (login di WO). Dev tanpa WO: isi manual lewat DevTools.
 ```
 Catatan: akses data memakai `pg` + migrasi SQL (bukan Prisma) agar sederhana; foto disimpan lewat antarmuka storage (`STORAGE_DRIVER=local` volume `UPLOAD_DIR`, atau `s3` untuk Garage) dan disajikan lewat signed URL. Kamera/GPS butuh HTTPS di produksi.

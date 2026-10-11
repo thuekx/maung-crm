@@ -6,3 +6,4 @@ dist
 uploads
 backups
 next-env.d.ts
+*.tsbuildinfo
