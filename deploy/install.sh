@@ -47,7 +47,7 @@ getenv() { grep -m1 "^$1=" .env 2>/dev/null | cut -d= -f2- | tr -d "'\"" || true
 rand() { openssl rand -hex 32; }
 dc() { docker compose "$@"; }
 
-line; echo "MAUNG-CRM INSTALL"; echo "MODE=$MODE  WO_VM=$WO_VM  $(date '+%F %T %Z')"; line
+line; echo "MAUNG-CRM INSTALL"; echo "HOST=$(hostname)  MODE=$MODE  WO_VM=$WO_VM  $(date '+%F %T %Z')"; line
 
 # ───────────────────────── 1. Guard direktori & lingkungan ─────────────────────────
 phase "Guard direktori & lingkungan"
@@ -64,7 +64,10 @@ if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
   DOCKER_OK=1
 else
   DOCKER_OK=0
-  if [ "$MODE" = full ]; then die "docker tidak terpasang / tidak bisa diakses user ini"; else warn "docker tidak dapat diakses — pemeriksaan kontainer dilewati"; fi
+  if [ "$MODE" = full ]; then
+    if ! command -v docker >/dev/null; then die "docker TIDAK terpasang di host '$(hostname)'. Apakah ini server yang benar? (CRM dipasang di VM yang sama dengan Maung WO)"
+    else die "docker ada tapi user '$(id -un)' tidak punya izin di host '$(hostname)' (butuh grup docker: sudo usermod -aG docker $(id -un), lalu login ulang) — atau ini bukan server yang benar"; fi
+  else warn "docker tidak dapat diakses — pemeriksaan kontainer dilewati"; fi
 fi
 FREE_MB=$(df -Pm "$ROOT" | awk 'NR==2{print $4}'); echo "disk_free_mb=$FREE_MB"
 [ "${FREE_MB:-0}" -ge 3000 ] && ok "ruang disk cukup" || warn "ruang disk < 3 GB"
