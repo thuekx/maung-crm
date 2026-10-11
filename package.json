@@ -1,0 +1,9 @@
+{
+  "name": "maung-crm",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "typecheck": "npm run typecheck -w apps/api && npm run typecheck -w apps/web",
+    "test": "npm test -w apps/api"
+  }
+}
