@@ -17,7 +17,7 @@ PASS=0; FAILC=0
 chk() { if eval "$2"; then echo "   ✓ $1"; PASS=$((PASS+1)); else echo "   ✗ $1   [$2]"; FAILC=$((FAILC+1)); fi; }
 setup() { # setup <nama>
   H=$S/home-$1; STUB=$S/stub-$1; rm -rf $H $STUB; mkdir -p $H $STUB $H/Maung-Wo-Inv
-  git clone -q $S/maung-crm.git $H/maung-crm
+  git clone -q $S/maung-crm.git $H/maung-crm; cp -r "$REPO/scripts/." "$H/maung-crm/scripts/"  # uji berkas kerja saat ini (di CI = isi commit)
   git -C $H/Maung-Wo-Inv init -q; printf 'WEB_DOMAIN=maung.liv.net.id\nJWT_SECRET=RAHASIA_WO\n' > $H/Maung-Wo-Inv/.env
   printf 'wo-api-1 aaa running\nwo-web-1 bbb running\nwo-caddy-1 ccc running\n' > $STUB/wo_ids
   cat > $H/maung-crm/.env <<EOT
@@ -37,8 +37,8 @@ EOT
   as_user "HOME=$H git config --global --add safe.directory '*'"
 }
 run() { # run <nama> [ENV=...]
-  local n=$1; shift
-  as_user "cd $S/home-$n/maung-crm && HOME=$S/home-$n STUB=$S/stub-$n PATH=$S/bin:\$PATH EXPECT_HOST=\${EXPECT_HOST_OVERRIDE:-$(hostname)} $* bash scripts/update.sh </dev/null" > $S/out-$n.txt 2>&1; echo $? > $S/rc-$n
+  local n=$1; shift; local t0=$(date +%s)
+  as_user "cd $S/home-$n/maung-crm && HOME=$S/home-$n STUB=$S/stub-$n PATH=$S/bin:\$PATH EXPECT_HOST=\${EXPECT_HOST_OVERRIDE:-$(hostname)} WAIT_API=4 WAIT_WEB=4 WAIT_BACK=4 POLL_INTERVAL=1 $* bash scripts/update.sh </dev/null" > $S/out-$n.txt 2>&1; echo $? > $S/rc-$n; echo "   (waktu: $(( $(date +%s) - t0 ))s)"
 }
 has() { grep -qF -- "$2" $S/out-$1.txt; }
 calls() { grep -qF -- "$2" $S/stub-$1/calls.log; }
@@ -109,7 +109,7 @@ echo; echo "UPDATE.SH TOTAL: lulus=$PASS gagal=$FAILC"; [ "$FAILC" = 0 ]
 ) || RC=1
 (
 PASS=0; FAILC=0
-setup() { H=$S/dk-$1; STUB=$S/dkstub-$1; rm -rf $H $STUB; mkdir -p $H $STUB; git clone -q $S/maung-crm.git $H/maung-crm; git -C $H/maung-crm remote set-url origin https://github.com/thuekx/maung-crm.git; own $H $STUB; chmod 755 $H; }
+setup() { H=$S/dk-$1; STUB=$S/dkstub-$1; rm -rf $H $STUB; mkdir -p $H $STUB; git clone -q $S/maung-crm.git $H/maung-crm; cp -r "$REPO/scripts/." "$H/maung-crm/scripts/"; git -C $H/maung-crm remote set-url origin https://github.com/thuekx/maung-crm.git; own $H $STUB; chmod 755 $H; }
 run() { n=$1; shift; as_user "cd $S/dk-$n/maung-crm && HOME=$S/dk-$n STUB=$S/dkstub-$n PATH=$S/bin-ssh:\$PATH EXPECT_HOST=\${EH:-$(hostname)} $* bash scripts/setup-deploy-key.sh </dev/null" > $S/dkout-$n.txt 2>&1; echo $? > $S/dkrc-$n; }
 has() { grep -qF -- "$2" $S/dkout-$1.txt; }
 echo "### T1 kunci belum ditambahkan → WAITING_KEY"; setup t1; run t1

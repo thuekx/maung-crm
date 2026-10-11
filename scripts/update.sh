@@ -9,6 +9,8 @@ N=9; P=0; CUR=""; WARNS=()
 EXPECT_HOST="${EXPECT_HOST:-maung-apps}"
 APP_DIR="${APP_DIR:-$HOME/maung-crm}"
 WO_DIR="${WO_DIR:-$HOME/Maung-Wo-Inv}"
+# Batas tunggu (detik) — bawaan produksi; hanya tes yang memperpendek lewat env.
+WAIT_API="${WAIT_API:-150}"; WAIT_WEB="${WAIT_WEB:-90}"; WAIT_BACK="${WAIT_BACK:-90}"; POLL="${POLL_INTERVAL:-3}"
 LOG_DIR="$HOME/maung-crm-logs"; BK_DIR="$LOG_DIR/backup"; STATE_DIR="$LOG_DIR/state"
 mkdir -p "$BK_DIR" "$STATE_DIR"; chmod 700 "$LOG_DIR"
 TS=$(date +%Y%m%d-%H%M%S); LOG="$LOG_DIR/update-$TS.log"
@@ -32,7 +34,8 @@ http() { curl -s -o /dev/null -m 15 -w '%{http_code}' "$1" 2>/dev/null || echo 0
 sha() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
 wo_ids() { docker ps -a --filter "label=com.docker.compose.project=maung-wo-inv" --format '{{.Names}} {{.ID}} {{.State}}' 2>/dev/null | sort; }
 wait_healthy() { # wait_healthy <service> <detik>
-  local c i; for i in $(seq 1 $(( $2 / 3 ))); do c=$(cid "$1"); [ -n "$c" ] && [ "$(hstat "$c")" = healthy ] && return 0; sleep 3; done; return 1; }
+  local c i n=$(( $2 / POLL )); [ "$n" -ge 1 ] || n=1
+  for i in $(seq 1 "$n"); do c=$(cid "$1"); [ -n "$c" ] && [ "$(hstat "$c")" = healthy ] && return 0; sleep "$POLL"; done; return 1; }
 mask() { sed -E 's#(://[^:/@ ]+:)[^@ ]+@#\1***@#g; s/((secret|password|token|passwd|key)[A-Za-z_]*[=:] *)[^ ,"]+/\1***/Ig'; }
 
 diag() {
@@ -51,7 +54,7 @@ rollback() {
   if [ "$PREV_MODE" = yes ]; then
     setenv IMAGE_TAG "$PREV_TAG"
     dc up -d crm-api crm-web >/dev/null 2>&1
-    wait_healthy crm-api 90 && ok "versi sebelumnya (${PREV_TAG:0:12}…) berjalan kembali" || warn "versi sebelumnya belum sehat — periksa manual"
+    wait_healthy crm-api "$WAIT_BACK" && ok "versi sebelumnya (${PREV_TAG:0:12}…) berjalan kembali" || warn "versi sebelumnya belum sehat — periksa manual"
     ROLLED="ya (kembali ke tag ${PREV_TAG:0:12})"
   else
     for c in $LEGACY_IDS; do docker start "$c" >/dev/null 2>&1; done
@@ -178,8 +181,8 @@ phase "Jalankan stack baru (crm-api, crm-web) — container lama tetap hidup"
 dc up -d crm-api crm-web >/tmp/crm-up.out 2>&1; URC=$?
 sed 's/^/  /' /tmp/crm-up.out | tail -12
 [ "$URC" = 0 ] || { diag; fail "docker compose up gagal"; }
-wait_healthy crm-api 150 && ok "crm-api healthy" || { diag; fail "crm-api tidak healthy dalam 2,5 menit"; }
-wait_healthy crm-web 90 && ok "crm-web healthy" || { diag; fail "crm-web tidak healthy dalam 90 detik"; }
+wait_healthy crm-api "$WAIT_API" && ok "crm-api healthy" || { diag; fail "crm-api tidak healthy dalam ${WAIT_API} detik"; }
+wait_healthy crm-web "$WAIT_WEB" && ok "crm-web healthy" || { diag; fail "crm-web tidak healthy dalam ${WAIT_WEB} detik"; }
 V_UP=OK
 
 # ───────────────────────── 7. Garage ─────────────────────────
@@ -196,7 +199,7 @@ else
   [ -n "$AK" ] && [ -n "$SK" ] || { printf '%s\n' "$OUT" | sed 's/\(Secret key:\).*/\1 ***/'; fail "kunci Garage tidak terbaca"; }
   $G bucket allow --read --write --owner "$BUCKET" --key crm-key >/dev/null || fail "izin bucket Garage gagal"
   setenv S3_ACCESS_KEY "$AK"; setenv S3_SECRET_KEY "$SK"; V_GARAGE="diinisialisasi (kunci disimpan ke .env, tidak ditampilkan)"; ok "$V_GARAGE"
-  dc up -d crm-api >/dev/null 2>&1; wait_healthy crm-api 90 || fail "crm-api tidak sehat setelah kunci S3 diisi"
+  dc up -d crm-api >/dev/null 2>&1; wait_healthy crm-api "$WAIT_BACK" || fail "crm-api tidak sehat setelah kunci S3 diisi"
 fi
 dc exec -T crm-api node -e "import('./dist/storage.js').then(async m=>{const s=m.storage();await s.put('_selftest/x.txt',Buffer.from('ok'),'text/plain');process.exit((await s.get('_selftest/x.txt')).toString()==='ok'?0:1)}).catch(e=>{console.error(e.message);process.exit(1)})" >/dev/null 2>&1 \
   && ok "uji tulis/baca objek ke Garage dari crm-api berhasil" || fail "uji tulis/baca Garage dari crm-api gagal"
