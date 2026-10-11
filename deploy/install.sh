@@ -3,16 +3,17 @@
 #   bash deploy/install.sh                    # penuh (7 fase)
 #   bash deploy/install.sh --check            # hanya fase 1-2 (guard + pemeriksaan WO, tanpa mengubah apa pun)
 #   bash deploy/install.sh --env-only         # fase 1-3 (siapkan .env saja)
-#   opsi: --wo-url URL | --wo-vm | env GHCR_TOKEN=... (package GHCR private)
+#   opsi: --wo-url URL | --wo-vm | --standalone (izinkan host tanpa Maung WO) | env GHCR_TOKEN=... | CRM_EXPECT_HOST=nama-host
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
-WO_URL_ARG=""; WO_VM=0; MODE=full
+WO_URL_ARG=""; WO_VM=0; MODE=full; STANDALONE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --wo-url) WO_URL_ARG="${2:?--wo-url butuh nilai}"; shift 2 ;;
     --wo-vm) WO_VM=1; shift ;;
+    --standalone) STANDALONE=1; shift ;;
     --check) MODE=check; shift ;;
     --env-only) MODE=env; shift ;;
     *) echo "Opsi tidak dikenal: $1"; exit 1 ;;
@@ -56,6 +57,15 @@ grep -q '^name: maung-crm' docker-compose.yml 2>/dev/null || die "bukan direktor
 ok "direktori adalah repo maung-crm"
 case "$ROOT" in *Maung-Wo-Inv*|*maung-wo-inv*) die "direktori berada di dalam folder Maung WO — pindah ke folder CRM sendiri" ;; esac
 ok "terpisah dari folder Maung WO"
+echo "host=$(hostname)  expected=${CRM_EXPECT_HOST:-(tidak ditetapkan)}"
+if [ -n "${CRM_EXPECT_HOST:-}" ] && [ "$(hostname)" != "$CRM_EXPECT_HOST" ]; then die "HOST SALAH: ini '$(hostname)', diharapkan '$CRM_EXPECT_HOST' — pindah ke server yang benar (tidak ada yang diubah)"; fi
+[ -z "${CRM_EXPECT_HOST:-}" ] || ok "nama host sesuai ($(hostname))"
+WO_DIR=""
+for d in "$HOME/Maung-Wo-Inv" "$ROOT/../Maung-Wo-Inv" "$HOME/maung-wo-inv"; do [ -d "$d/.git" ] && { WO_DIR="$(cd "$d" && pwd)"; break; }; done
+WO_CT=0; command -v docker >/dev/null && WO_CT=$(docker ps -a -q --filter "label=com.docker.compose.project=maung-wo-inv" 2>/dev/null | wc -l)
+if [ -n "$WO_DIR" ] || [ "$WO_CT" -gt 0 ]; then ok "Maung WO ada di host ini (folder=${WO_DIR:--}, container=$WO_CT)"
+elif [ "$STANDALONE" = 1 ]; then warn "Maung WO tidak ditemukan di host ini (diizinkan: --standalone)"
+else [ "$MODE" = check ] && warn "Maung WO tidak ditemukan di host ini" || die "Maung WO TIDAK ditemukan di host '$(hostname)' — ini bukan server WO? (CRM dipasang di VM yang sama dengan WO; gunakan --standalone bila memang disengaja)"; fi
 if [ -d .git ] && git remote get-url origin 2>/dev/null | grep -qi 'maung-crm'; then ok "remote git = maung-crm ($(git rev-parse --short HEAD))"; else warn "remote git bukan maung-crm / bukan repo git"; fi
 if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
   ok "docker dapat diakses ($(docker --version | cut -d, -f1))"
@@ -79,8 +89,6 @@ else ok "port $WEB_PORT_CUR bebas"; fi
 
 # ───────────────────────── 2. Pemeriksaan Maung WO (baca-saja) ─────────────────────────
 phase "Pemeriksaan Maung WO (baca-saja, tidak mengubah apa pun)"
-WO_DIR=""
-for d in "$HOME/Maung-Wo-Inv" "$ROOT/../Maung-Wo-Inv" "$HOME/maung-wo-inv"; do [ -d "$d/.git" ] && { WO_DIR="$(cd "$d" && pwd)"; break; }; done
 WO_CHECKOUT="TIDAK_DITEMUKAN"; WO_DEPLOY="TIDAK_DIKETAHUI"
 if [ -n "$WO_DIR" ]; then
   echo "wo_dir=$WO_DIR"
