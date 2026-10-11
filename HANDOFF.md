@@ -27,3 +27,10 @@ Express 5 + TypeScript + Prisma 7 (adapter-pg) + PostgreSQL 16 (PostGIS bila per
 3. Dashboard KPI, review manager (Draft→Submitted→Reviewed→Revision Required→Completed), Area Prospect / Partnership Opportunity, reimbursement → Finance.
 4. Offline draft & sync, analytics lanjutan.
 Keputusan terbuka untuk pemilik: lokasi object storage (MinIO/Garage vs volume), apakah memakai PostGIS, apakah Lead/Opportunity memakai master pelanggan WO atau modul CRM sendiri.
+
+## Preferensi cara kerja dari pemilik (wajib diikuti)
+- **Perintah ke server = SATU skrip otomatis berfase**, bukan langkah manual terpisah. Format keluaran seperti contoh pemilik: banner `====`, `[n/N] nama fase`, baris `✓`/`!`/`✗`, lalu blok `RESULT` berisi `kunci=nilai` (status, proof/audit log, apa yang TIDAK diubah) dan baris akhir `RESULT : ... PASS/GAGAL / NEXT=...`. Contoh: `deploy/install.sh`.
+- **Guard dulu sebelum eksekusi**: tampilkan `pwd`, cek direktori (kosong / repo yang benar / bukan folder aplikasi lain), buat direktori baru khusus untuk aplikasi, dan hentikan tanpa mengubah apa pun bila ragu. Jangan jalankan perintah di direktori yang belum diperiksa (insiden: `cp .env.example .env` menimpa `.env` Maung WO saat `cd` gagal).
+- Skrip menulis log audit ke `~/maung-crm-logs/`, tidak pernah mencetak secret, dan tidak menimpa `.env`.
+- Minta pemilik mengetik/menjalankan perintah manual hanya bila benar-benar tidak mungkin (mis. token GitHub untuk repo private); jelaskan alasannya.
+
