@@ -29,8 +29,17 @@ line() { printf '%*s\n' 60 '' | tr ' ' '='; }
 phase() { P=$((P+1)); CUR="$1"; echo; echo "[$P/$TOTAL] $1"; }
 ok() { echo "✓ $*"; }
 warn() { echo "! $*"; WARNS+=("$*"); }
+wo_snapshot() {
+  echo "wo_status_saat_ini (baca-saja):"
+  if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
+    docker ps -a --filter "label=com.docker.compose.project=maung-wo-inv" --format '  {{.Label "com.docker.compose.service"}}: {{.Status}}' 2>/dev/null | sort
+  else echo "  (docker tidak dapat diakses)"; fi
+  local u; u="$(grep -m1 '^WO_URL=' .env 2>/dev/null | cut -d= -f2- | tr -d "'\"")"
+  [ -n "$u" ] && echo "  web WO $u → HTTP $(curl -s -o /dev/null -m 10 -w '%{http_code}' "$u/" || echo 000)"
+}
 die() { echo "✗ $*"; echo; line; echo "RESULT"; line
   echo "CRM_INSTALL=FAIL"; echo "failed_phase=[$P/$TOTAL] $CUR"; echo "audit_log=$LOG"
+  echo "container_crm_dibuat=$( [ "$P" -ge 5 ] && echo MUNGKIN || echo TIDAK )"; echo "wo_dimodifikasi=TIDAK"; wo_snapshot
   echo "RESULT : GAGAL — kirim baris ✗ di atas (tanpa nilai secret)"; exit 1; }
 
 setenv() { if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else echo "$1=$2" >> .env; fi; }
@@ -135,8 +144,13 @@ if [ "$MODE" = env ]; then echo; line; echo "RESULT"; line; echo "CRM_ENV=READY"
 phase "Tarik image dari GHCR"
 if ! dc pull 2>"$LOGDIR/.pull.err"; then
   if [ -n "${GHCR_TOKEN:-}" ]; then
+    case "$GHCR_TOKEN" in github_pat_*) KIND="fine-grained (TIDAK didukung GHCR — pakai token classic)";; ghp_*) KIND="classic";; *) KIND="tidak dikenali";; esac
+    HDR=$(curl -s -m 10 -D - -o /dev/null -H "Authorization: Bearer $GHCR_TOKEN" https://api.github.com/user | tr -d '\r')
+    SC=$(printf '%s\n' "$HDR" | awk -F': ' 'tolower($1)=="x-oauth-scopes"{print $2}')
+    echo "token_jenis=$KIND"; echo "token_http=$(printf '%s\n' "$HDR" | awk 'NR==1{print $2}')"; echo "token_scopes=${SC:-(kosong)}"
+    case ",$(printf '%s' "$SC" | tr -d ' ')," in *,read:packages,*|*,write:packages,*) ok "token punya scope packages" ;; *) warn "token TIDAK punya scope read:packages → pull akan ditolak" ;; esac
     echo "login GHCR…"; printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-thuekx}" --password-stdin >/dev/null 2>&1 || die "login GHCR ditolak (token salah / tanpa scope read:packages)"
-    dc pull || die "pull image gagal setelah login"
+    dc pull || die "pull ditolak (denied). Perbaikan: buat token classic dengan scope read:packages + repo, ATAU jadikan package Public (GitHub → profil → Packages → maung-crm-api & maung-crm-web → Package settings → Change visibility)"
   else cat "$LOGDIR/.pull.err"; die "pull gagal; bila package private jalankan dengan GHCR_TOKEN=<token read:packages>"; fi
 fi
 for s in api web; do img=$(dc config --images | grep "maung-crm-$s"); echo "  $s: $img  dibuat $(docker image inspect -f '{{.Created}}' "$img" 2>/dev/null | cut -c1-19)"; done
@@ -192,5 +206,6 @@ echo "wo_checkout=$WO_CHECKOUT"; echo "wo_deploy=$WO_DEPLOY"
 echo "api_health=$HEALTH"; echo "storage_garage=$STORE"; echo "wo_introspect=$WO_FROM"
 echo "env_ditimpa=TIDAK"; echo "wo_dimodifikasi=TIDAK"
 echo "peringatan=${#WARNS[@]}"; for w in "${WARNS[@]:-}"; do [ -n "$w" ] && echo "  - $w"; done
+wo_snapshot
 echo "audit_log=$LOG"
 echo; echo "RESULT : CRM INSTALL PASS / NEXT=HTTPS_CADDY_WO + MODUL_LEAD"
