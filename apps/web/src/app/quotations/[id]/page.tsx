@@ -55,6 +55,17 @@ export default function QuotationDetail({ params }: { params: Promise<{ id: stri
         <div className="pt-1"><Link className="btn-secondary" href={`/quotations/${q.id}/print`}>🖨 Cetak / PDF (kop surat)</Link></div>
       </div>
 
+      {q.wo && (
+        <div className="card space-y-1 text-sm">
+          <b>Sinkron ke WO</b>
+          {q.wo.syncedAt ? (
+            <p className="text-slate-600">Tersinkron: {q.wo.syncedStatus} (rev {q.wo.syncedRev}) · {fmtDate(q.wo.syncedAt)}{q.wo.woNumber ? ` · WO ${q.wo.woNumber}` : ""}</p>
+          ) : <p className="text-slate-500">{["SENT", "ACCEPTED", "REJECTED", "EXPIRED"].includes(s) ? "Menunggu dikirim ke WO." : "Belum dikirim ke WO (dikirim saat status Terkirim)."}</p>}
+          {q.wo.warnings?.error && <p className="text-red-600">Ditolak WO: {q.wo.warnings.error}</p>}
+          {q.wo.warnings?.marketingMatched === false && <p className="text-xs text-amber-700">Marketing {q.marketingName} tidak dikenali sebagai pengguna MKT aktif di WO — nama &amp; id tetap tersimpan apa adanya.</p>}
+        </div>
+      )}
+
       {s === "DRAFT" ? <QuoteEditor key={q.updatedAt} q={q} catalog={catalog} onSaved={load} /> : (
         <div className="card space-y-2 text-sm">
           <b>Rincian</b>

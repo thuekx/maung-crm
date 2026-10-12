@@ -3,6 +3,8 @@ import { z } from "zod";
 import { audit, pool } from "./db.js";
 import { isReviewer, type Principal } from "./auth.js";
 import { advanceLead } from "./leads.js";
+import { enqueue } from "./woPush.js";
+import { woCustomerProblems } from "./woPayload.js";
 
 const fail = (status: number, error: string) => Object.assign(new Error(error), { status });
 const ah = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
@@ -28,7 +30,7 @@ const bodySchema = z.object({
   customerAddress: z.string().trim().max(300).optional(),
   picName: z.string().trim().max(120).optional(),
   validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  terms: z.string().trim().max(3000).optional(),
+  terms: z.string().trim().max(2000).optional(), // batas WO
   notes: z.string().trim().max(2000).optional(),
   taxRate: z.number().min(0).max(100).optional(),
   discount: z.number().min(0).max(1e12).optional(),
@@ -100,6 +102,7 @@ export async function detail(q: any) {
     taxRate: n(q.tax_rate), discount: n(q.discount), subtotal: n(q.subtotal), taxAmount: n(q.tax_amount), total: n(q.total),
     sentAt: q.sent_at, decidedAt: q.decided_at, decisionNote: q.decision_note, approvedByName: q.approved_by_name, approvedAt: q.approved_at,
     createdAt: q.created_at, updatedAt: q.updated_at,
+    wo: { syncedAt: q.wo_synced_at ?? null, syncedRev: q.wo_synced_rev ?? null, syncedStatus: q.wo_synced_status ?? null, woNumber: q.wo_number ?? null, warnings: q.wo_warnings ?? null },
     lines: lines.rows.map((l) => ({ ...l, qty: n(l.qty), unitPrice: n(l.unitPrice) })),
     events: events.rows, revisions: revs.rows.map((r) => ({ ...r, total: Number(r.total) })),
   };
@@ -109,7 +112,7 @@ export async function detail(q: any) {
 export async function sweepExpired(): Promise<number> {
   const r = await pool.query(
     `UPDATE quotations SET status='EXPIRED', updated_at=now(), decided_at=now() WHERE status='SENT' AND valid_until IS NOT NULL AND valid_until < CURRENT_DATE AND deleted_at IS NULL RETURNING id`);
-  for (const x of r.rows) await event(pool, x.id, "STATUS", { from: "SENT", to: "EXPIRED", note: "Masa berlaku berakhir", actor: null });
+  for (const x of r.rows) { await event(pool, x.id, "STATUS", { from: "SENT", to: "EXPIRED", note: "Masa berlaku berakhir", actor: null }); await enqueue("QUOTATION", x.id); }
   return r.rowCount ?? 0;
 }
 export function startExpirySweep() { setInterval(() => sweepExpired().catch((e) => console.error("sweep penawaran:", e)), 3_600_000).unref(); }
@@ -231,6 +234,8 @@ quotationRoutes.post("/:id/:action", ah(async (req, res) => {
     if (!n) throw fail(409, "Tambahkan minimal satu baris sebelum diajukan");
     if (key === "submit") {
       if (!q.valid_until) throw fail(409, "Isi tanggal berlaku sampai");
+      const miss = woCustomerProblems({ customerName: q.customer_name, customerPhone: q.customer_phone, customerAddress: q.customer_address, customerEmail: q.customer_email });
+      if (miss.length) throw fail(409, `Lengkapi data pelanggan sebelum diajukan (dibutuhkan WO): ${miss.join(", ")}`);
       const bad = (await pool.query("SELECT l.name FROM quotation_lines l JOIN catalog_items c ON c.id=l.catalog_id WHERE l.quotation_id=$1 AND NOT c.active LIMIT 1", [id])).rows[0];
       if (bad) throw fail(409, `Item katalog "${bad.name}" sudah nonaktif — ganti barisnya`);
     }
@@ -250,6 +255,7 @@ quotationRoutes.post("/:id/:action", ah(async (req, res) => {
     await event(c, id, "STATUS", { from: q.status, to: a.to, note: body.note, actor: u });
     if (key === "send") await advanceLead(c, q.lead_id, "NEGOTIATION", `Penawaran ${q.number} dikirim`, u);
     if (key === "accept") await advanceLead(c, q.lead_id, "WON", `Penawaran ${q.number} disetujui pelanggan`, u);
+    if (["send", "accept", "reject", "cancel"].includes(key)) await enqueue("QUOTATION", id, c); // kirim ke WO (QUOTED / WON / LOST)
     await audit(u.id, "quotation", id, key.toUpperCase(), { status: q.status }, { status: a.to }, c);
     await c.query("COMMIT");
   } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }

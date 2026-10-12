@@ -18,6 +18,45 @@ const USERS: Record<string, any> = {
 };
 let wo: http.Server, api: http.Server, base = "";
 // Export API WO tiruan: customers dibagi 2 halaman (cursor); packages/areas = 404 (belum ada di WO); kunci salah = 401.
+
+// Pintu masuk CRM → WO tiruan mengikuti docs/API.md WO ("Integrasi CRM → WO"): kunci x-api-key, validasi isi, aturan WON terkunci/stale/duplicate.
+const CRM_KEY = "k-test-crm-integration";
+let woMode: string = "ok";
+const woCalls: { method: string; path: string; body: any }[] = [];
+const woCatalog = new Map<string, any>(), woQuotes = new Map<string, any>();
+const crmMock = (req: http.IncomingMessage, res: http.ServerResponse) => {
+  let raw = "";
+  req.on("data", (c) => (raw += c));
+  req.on("end", () => {
+    const send = (st: number, o: any) => { res.statusCode = st; res.setHeader("content-type", "application/json"); res.end(JSON.stringify(o)); };
+    if (req.headers["x-api-key"] !== CRM_KEY) return send(401, { error: "API key tidak valid" });
+    const body = raw ? JSON.parse(raw) : {};
+    const [, kind, crmId] = /^\/api\/integrations\/crm\/(catalog|quotations)\/([^/?]+)/.exec(req.url!) ?? [];
+    woCalls.push({ method: req.method!, path: `${kind}/${crmId}`, body });
+    if (woMode === "down") return send(503, { error: "layanan sibuk" });
+    if (kind === "catalog") {
+      if (!body.name || body.name.length < 2 || body.name.length > 80 || !["SERVICE", "PRODUCT"].includes(body.kind)) return send(400, { error: "isian katalog tidak valid" });
+      const other = [...woCatalog.entries()].find(([id, c]) => c.name.toLowerCase() === body.name.toLowerCase() && id !== crmId);
+      if (other) return send(409, { error: `Nama "${body.name}" sudah dipakai paket lain` });
+      const had = woCatalog.has(crmId); woCatalog.set(crmId, body);
+      return send(had ? 200 : 201, { ok: true, created: !had, ...(body.sku ? { skuFound: body.sku === "CCTV-DOME-2MP", itemName: null } : {}) });
+    }
+    if (!String(body.marketingUserId ?? "").trim() || !String(body.marketingName ?? "").trim()) return send(422, { error: "marketingUserId dan marketingName wajib" });
+    const c = body.customer ?? {};
+    if (!(c.name?.length >= 2) || !/^[0-9+][0-9 +()-]*$/.test(c.phone ?? "") || c.phone.length < 6 || !(c.address?.length >= 5) || !Array.isArray(body.lines) || !body.lines.length) return send(400, { error: "isian penawaran tidak valid" });
+    if (c.code && c.code !== "A5") return send(404, { error: `Pelanggan ${c.code} tidak ditemukan di WO` });
+    const cur = woQuotes.get(crmId);
+    const view = (q: any) => ({ quotationId: "w1", crmId, number: q.number, rev: q.rev, status: q.status, woNumber: null });
+    if (cur) {
+      if (body.rev < cur.rev) return send(200, { ok: true, stale: true, ...view(cur) });
+      if (cur.status === "WON" && (body.rev > cur.rev || body.status !== "WON")) return send(409, { error: "Penawaran sudah WON dan terkunci" });
+      if (body.rev === cur.rev && body.status === cur.status) return send(200, { ok: true, duplicate: true, ...view(cur) });
+      if (body.rev === cur.rev && cur.status === "LOST") return send(409, { error: "sudah LOST pada revisi ini" });
+    }
+    woQuotes.set(crmId, body);
+    send(cur ? 200 : 201, { ok: true, ...view(body), warnings: { marketingMatched: body.marketingUserId === "u-nurman", unknownCatalog: [], skuNotFound: [], areaNotFound: false } });
+  });
+};
 const EXPORT_KEY = "k-test-export";
 let exportData: Record<string, any[]> = {};
 const exportMock = (req: http.IncomingMessage, res: http.ServerResponse) => {
@@ -42,6 +81,7 @@ before(async () => {
       return void res.end(JSON.stringify(u ?? { error: "Belum login" }));
     }
     if (req.url?.startsWith("/api/export/")) return void exportMock(req, res);
+    if (req.url?.startsWith("/api/integrations/crm/")) return void crmMock(req, res);
     res.statusCode = 404; res.end();
   });
   await new Promise<void>((r) => wo.listen(0, r));
@@ -371,7 +411,7 @@ test("Katalog & penawaran: hitung total di server, alur status, revisi, kunci se
   assert.equal((await rq("tNurman", "GET", "/catalog")).d.length >= 3, true);
 
   // lead non-internet (+ lead internet ditolak untuk penawaran)
-  const lead = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Toko Maju", phone: "081377770001", interest: "CCTV 4 titik" })).d;
+  const lead = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Toko Maju", address: "Jl. Uji Coba No. 1, Bekasi", phone: "081377770001", interest: "CCTV 4 titik" })).d;
   const inet = (await rq("tNurman", "POST", "/leads", { kind: "INTERNET", name: "Pak Net", phone: "081377770002" })).d;
   assert.equal((await rq("tNurman", "POST", "/quotations", { leadId: inet.id })).s, 409);
 
@@ -427,7 +467,7 @@ test("Katalog & penawaran: hitung total di server, alur status, revisi, kunci se
   assert.equal((await rq("tNurman", "PUT", `/quotations/${q.id}`, { subject: "x" })).s, 409);
 
   // kedaluwarsa otomatis & batal & ditolak
-  const l2 = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Kantor B", phone: "081377770003" })).d;
+  const l2 = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Kantor B", address: "Jl. Uji Coba No. 1, Bekasi", phone: "081377770003" })).d;
   const q2 = (await rq("tNurman", "POST", "/quotations", { leadId: l2.id, validUntil: "2099-01-01", lines: [{ catalogId: wifi, qty: 1 }] })).d;
   assert.match(q2.number, /-0002$/);
   await rq("tNurman", "POST", `/quotations/${q2.id}/submit`); await rq("tMgr", "POST", `/quotations/${q2.id}/approve`); await rq("tNurman", "POST", `/quotations/${q2.id}/send`);
@@ -514,7 +554,7 @@ test("Jejak marketing permanen: snapshot id+nama pada lead & penawaran; tahan ga
   const { detail } = await import("./quotations.js");
 
   const item = (await rq("tMgr", "POST", "/catalog", { name: "Jejak Item", sku: "JEJAK-1", kind: "SERVICE", unit: "paket", price: 1000000 })).d.id;
-  const lead = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Pelanggan Jejak", phone: "081399990001" })).d;
+  const lead = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Pelanggan Jejak", address: "Jl. Uji Coba No. 1, Bekasi", phone: "081399990001" })).d;
   assert.deepEqual([lead.ownerId, lead.ownerName, lead.createdBy, lead.createdByName], ["u-nurman", "Nurman", "u-nurman", "Nurman"]);
   const q = (await rq("tNurman", "POST", "/quotations", { leadId: lead.id, lines: [{ catalogId: item, qty: 2 }] })).d;
   assert.deepEqual([q.marketingUserId, q.marketingName, q.createdByName], ["u-nurman", "Nurman", "Nurman"]);
@@ -588,4 +628,121 @@ test("Jejak Field Report: id + nama pembuat (report, foto, follow-up) snapshot p
   await assert.rejects(pool.query("UPDATE field_tasks SET created_by_name='X' WHERE id=$1", [task.id]), /jejak permanen/);
   // aksi biasa pada task (selesai) tetap berjalan
   assert.equal((await rq("tNurman", "PATCH", `/tasks/${task.id}`, { status: "DONE" })).s, 200);
+});
+
+test("Kirim CRM → WO (outbox): katalog dulu baru penawaran, jejak marketing, idempoten, coba ulang, BLOCKED + retry, LOST hanya bila pernah terkirim, kunci tak bocor", async () => {
+  const j = async (r: Response) => ({ s: r.status, d: await r.json().catch(() => ({})) as any });
+  const rq = (tok: string, m: string, path: string, body?: unknown) => call(tok, m, "/crm/api" + path, body).then(j);
+  const { processOutbox, enqueueBackfill, pushEnabled } = await import("./woPush.js");
+  const reset = () => { woCalls.length = 0; woCatalog.clear(); woQuotes.clear(); woMode = "ok"; };
+  const q1 = async (sql: string, a: unknown[] = []) => (await pool.query(sql, a)).rows;
+  const due = () => pool.query("UPDATE wo_outbox SET next_attempt_at=now() WHERE status='PENDING'");
+  await pool.query("DELETE FROM wo_outbox"); await pool.query("UPDATE catalog_items SET wo_synced_at=now()"); await pool.query("UPDATE quotations SET wo_synced_at=NULL, wo_synced_rev=NULL, wo_synced_status=NULL");
+  reset();
+
+  // 0) tanpa kunci: tidak aktif, tidak mengirim apa pun
+  delete process.env.CRM_INTEGRATION_KEY;
+  assert.equal(pushEnabled(), false);
+  const cat = (await rq("tMgr", "POST", "/catalog", { name: "Kamera Outbox", sku: "OUTBOX-CAM-1", kind: "PRODUCT", unit: "unit", price: 900000 })).d.id;
+  const svc = (await rq("tMgr", "POST", "/catalog", { name: "Instalasi Outbox", kind: "SERVICE", unit: "titik", price: 150000 })).d.id;
+  assert.equal(await processOutbox().then((r) => r.done), 0); assert.equal(woCalls.length, 0);
+  assert.equal((await rq("tMgr", "POST", "/catalog", { name: "x".repeat(81), kind: "SERVICE" })).s, 400); // batas nama WO
+
+  // penawaran: data pelanggan harus memenuhi syarat WO sebelum diajukan
+  const lead = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Toko Outbox", phone: "0812 8888 0001", interest: "CCTV" })).d; // tanpa alamat
+  const q = (await rq("tNurman", "POST", "/quotations", { leadId: lead.id, lines: [{ catalogId: cat, qty: 2 }, { catalogId: svc, qty: 2 }] })).d;
+  const need = await rq("tNurman", "POST", `/quotations/${q.id}/submit`);
+  assert.equal(need.s, 409); assert.match(need.d.error, /alamat/);
+  await rq("tNurman", "PUT", `/quotations/${q.id}`, { customerAddress: "Jl. Raya No. 5, Bekasi" });
+  await rq("tNurman", "POST", `/quotations/${q.id}/submit`); await rq("tMgr", "POST", `/quotations/${q.id}/approve`);
+  assert.equal((await q1("SELECT count(*)::int n FROM wo_outbox WHERE kind='QUOTATION'"))[0].n, 0); // belum SENT: tidak diantre
+  await rq("tNurman", "POST", `/quotations/${q.id}/send`);
+
+  // 1) dengan kunci: katalog lebih dulu, lalu penawaran QUOTED membawa jejak marketing (id + nama)
+  process.env.CRM_INTEGRATION_KEY = CRM_KEY;
+  assert.equal(pushEnabled(), true);
+  let r = await processOutbox();
+  assert.deepEqual([r.done, r.blocked, r.retry], [3, 0, 0]);
+  assert.deepEqual(woCalls.map((c) => c.path.split("/")[0]), ["catalog", "catalog", "quotations"]);
+  const put = woCalls.find((c) => c.path.startsWith("quotations"))!;
+  assert.equal(put.path, `quotations/quotation-${q.id}`); assert.equal(put.method, "PUT");
+  assert.deepEqual([put.body.marketingUserId, put.body.marketingName, put.body.status, put.body.rev], ["u-nurman", "Nurman", "QUOTED", 1]);
+  assert.equal(put.body.customer.address, "Jl. Raya No. 5, Bekasi"); assert.equal(put.body.customer.phone, "0812 8888 0001");
+  assert.equal(put.body.lines[0].catalogCrmId, `catalog-${cat}`); assert.equal(put.body.lines[0].sku, "OUTBOX-CAM-1");
+  assert.equal(put.body.total, 1.11 * (2 * 900000 + 2 * 150000)); assert.match(put.body.taxNote, /PPN 11%/);
+  assert.ok(!JSON.stringify(woCalls).includes(CRM_KEY)); // kunci tidak ada di isi permintaan
+  const row = (await q1("SELECT wo_synced_rev, wo_synced_status, wo_warnings FROM quotations WHERE id=$1", [q.id]))[0];
+  assert.deepEqual([row.wo_synced_rev, row.wo_synced_status, row.wo_warnings.marketingMatched], [1, "QUOTED", true]);
+
+  // 2) idempoten: antre ulang keadaan yang sama → tidak ada PUT baru
+  const { enqueue } = await import("./woPush.js");
+  woCalls.length = 0; await enqueue("QUOTATION", q.id); r = await processOutbox();
+  assert.equal(woCalls.length, 0);
+
+  // 3) WO tidak tersedia (503) → coba ulang bertahap (bukan BLOCKED); lalu pulih
+  woMode = "down";
+  await rq("tNurman", "POST", `/quotations/${q.id}/accept`);
+  r = await processOutbox(); assert.deepEqual([r.done, r.blocked, r.retry], [0, 0, 1]);
+  let job = (await q1("SELECT * FROM wo_outbox WHERE kind='QUOTATION' AND status='PENDING'"))[0];
+  assert.equal(job.attempts, 1); assert.equal(job.last_http, 503); assert.ok(new Date(job.next_attempt_at).getTime() > Date.now() + 30_000);
+  assert.equal((await processOutbox()).done, 0); // belum jatuh tempo → tidak dicoba lagi
+  woMode = "ok"; await due(); r = await processOutbox(); assert.equal(r.done, 1);
+  assert.equal(woQuotes.get(`quotation-${q.id}`).status, "WON");
+  assert.equal((await q1("SELECT wo_synced_status FROM quotations WHERE id=$1", [q.id]))[0].wo_synced_status, "WON");
+
+  // 4) kunci salah (401) → dicoba ulang (masalah konfigurasi), pesan tidak memuat kunci
+  const l2 = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Kantor Outbox", phone: "0812 8888 0002", address: "Jl. Kantor No. 9, Bandung" })).d;
+  const q2 = (await rq("tNurman", "POST", "/quotations", { leadId: l2.id, lines: [{ catalogId: svc, qty: 1 }] })).d;
+  await rq("tNurman", "POST", `/quotations/${q2.id}/submit`); await rq("tMgr", "POST", `/quotations/${q2.id}/approve`); await rq("tNurman", "POST", `/quotations/${q2.id}/send`);
+  process.env.CRM_INTEGRATION_KEY = "kunci-salah-xxxxxxxx";
+  r = await processOutbox(); assert.deepEqual([r.blocked, r.retry], [0, 1]);
+  const err401 = (await q1("SELECT last_error, last_http FROM wo_outbox WHERE kind='QUOTATION' AND ref_id=$1 AND status='PENDING'", [q2.id]))[0];
+  assert.equal(err401.last_http, 401); assert.ok(!err401.last_error.includes("kunci-salah") && !err401.last_error.includes(CRM_KEY));
+  process.env.CRM_INTEGRATION_KEY = CRM_KEY; await due(); assert.equal((await processOutbox()).done, 1);
+
+  // 5) ditolak karena isi (409 nama katalog bentrok) → BLOCKED, penawaran yang bergantung juga BLOCKED dengan alasan jelas; perbaiki → retry → selesai
+  woCatalog.set("catalog-bentrok", { name: "Router Bentrok" }); // sudah ada di WO atas nama lain
+  const bad = (await rq("tMgr", "POST", "/catalog", { name: "Router Bentrok", kind: "PRODUCT", unit: "unit", price: 1 })).d.id;
+  r = await processOutbox(); assert.deepEqual([r.done, r.blocked], [0, 1]);
+  const st = await rq("tMgr", "GET", "/wo-sync");
+  assert.equal(st.d.blocked, 1); assert.match(st.d.problems[0].lastError, /409/); assert.ok(!JSON.stringify(st.d).includes(CRM_KEY));
+  assert.equal((await rq("tNurman", "GET", "/wo-sync")).s, 403);
+  await rq("tMgr", "PATCH", `/catalog/${bad}`, { name: "Router Tidak Bentrok" }); // perbaikan → antre baru otomatis
+  assert.equal((await processOutbox()).done, 1);
+  assert.equal((await q1("SELECT wo_sync_error FROM catalog_items WHERE id=$1", [bad]))[0].wo_sync_error, null);
+  const blockedId = (await q1("SELECT id FROM wo_outbox WHERE status='BLOCKED' LIMIT 1"))[0]?.id;
+  if (blockedId) assert.equal((await rq("tMgr", "POST", `/wo-sync/${blockedId}/retry`)).s, 200);
+  assert.equal((await rq("tMgr", "POST", "/wo-sync/999999/retry")).s, 404);
+
+  // 6) batal sebelum pernah terkirim → tidak ada LOST; setelah pernah terkirim → LOST dengan alasan
+  woCalls.length = 0;
+  const l3 = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Batal Awal", phone: "0812 8888 0003", address: "Jl. Batal No. 3, Bekasi" })).d;
+  const q3 = (await rq("tNurman", "POST", "/quotations", { leadId: l3.id, lines: [{ catalogId: svc, qty: 1 }] })).d;
+  await rq("tNurman", "POST", `/quotations/${q3.id}/cancel`, { note: "Batal sebelum dikirim" });
+  await processOutbox(); assert.equal(woCalls.filter((c) => c.path.includes(`quotation-${q3.id}`)).length, 0);
+  await rq("tNurman", "POST", `/quotations/${q2.id}/reject`, { note: "Harga tinggi" });
+  await processOutbox();
+  const lost = woQuotes.get(`quotation-${q2.id}`);
+  assert.deepEqual([lost.status, lost.lostReason, lost.marketingUserId, lost.marketingName], ["LOST", "Harga tinggi", "u-nurman", "Nurman"]);
+
+  // 7) revisi: tidak dikirim saat DRAFT; setelah dikirim ulang → rev 2 QUOTED menggantikan LOST (rev lebih tinggi)
+  woCalls.length = 0;
+  await rq("tNurman", "POST", `/quotations/${q2.id}/revise`, { note: "Diskon" }); await processOutbox(); assert.equal(woCalls.length, 0);
+  await rq("tNurman", "POST", `/quotations/${q2.id}/submit`); await rq("tMgr", "POST", `/quotations/${q2.id}/approve`); await rq("tNurman", "POST", `/quotations/${q2.id}/send`);
+  await processOutbox();
+  assert.deepEqual([woQuotes.get(`quotation-${q2.id}`).rev, woQuotes.get(`quotation-${q2.id}`).status], [2, "QUOTED"]);
+
+  // 8) WON terkunci di WO: revisi baru ditolak WO (409) → BLOCKED, tidak diulang terus-menerus
+  woQuotes.get(`quotation-${q2.id}`).status = "WON";
+  await rq("tNurman", "POST", `/quotations/${q2.id}/cancel`, { note: "uji kunci" }); // CANCELLED → LOST dikirim → WO menolak
+  r = await processOutbox(); assert.equal(r.blocked, 1);
+
+  // 9) backfill: penawaran terkirim sebelum integrasi aktif ikut diantre; status tidak membocorkan kunci
+  await pool.query("UPDATE quotations SET wo_synced_rev=NULL, wo_synced_status=NULL, wo_synced_at=NULL WHERE id=$1", [q.id]);
+  await pool.query("DELETE FROM wo_outbox WHERE status='PENDING'");
+  assert.ok(await enqueueBackfill() >= 1);
+  assert.equal((await rq("tAdmin", "POST", "/wo-sync/run")).s, 200);
+  assert.ok(!JSON.stringify((await rq("tAdmin", "GET", "/wo-sync")).d).includes(CRM_KEY));
+  assert.equal((await rq("tMgr", "POST", "/wo-sync/run")).s, 403);
+  delete process.env.CRM_INTEGRATION_KEY;
 });

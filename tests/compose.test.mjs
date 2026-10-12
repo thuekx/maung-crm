@@ -55,3 +55,10 @@ test("crm-web menunggu crm-api sehat; postgres/garage tidak dipublikasikan", () 
   assert.equal(svc["crm-web"].depends_on["crm-api"].condition, "service_healthy");
   assert.equal(svc["crm-api"].depends_on.postgres.condition, "service_healthy");
 });
+
+test("kunci integrasi CRM→WO hanya diteruskan ke crm-api (sebagai variabel, tanpa nilai tertanam)", () => {
+  assert.equal(svc["crm-api"].environment.CRM_INTEGRATION_KEY, "${CRM_INTEGRATION_KEY:-}", "diisi dari .env, tidak ada nilai tertanam di compose");
+  assert.equal(svc["crm-api"].environment.WO_SYNC_ENABLED, "${WO_SYNC_ENABLED:-1}");
+  for (const n of ["crm-web", "postgres"]) assert.ok(!JSON.stringify(svc[n].environment ?? {}).includes("CRM_INTEGRATION_KEY"), `${n} tidak boleh menerima kunci integrasi`);
+  assert.ok(/\$\{CRM_INTEGRATION_KEY:-\}/.test(raw), "harus diambil dari lingkungan (${CRM_INTEGRATION_KEY:-})");
+});

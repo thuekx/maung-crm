@@ -76,12 +76,15 @@ case "$cmd" in
         shift_t=0; [ "$1" = "-T" ] && shift; svc="$1"; shift; a="$*"
         case "$svc" in
           postgres) case "$a" in *psql*)
+              case "$a" in *wo_outbox*) cat "$STUB/outbox" 2>/dev/null || echo "pending:0 blocked:0"; exit 0 ;; esac
               case "$a" in *"last_error IS NOT NULL"*) cat "$STUB/sync_err" 2>/dev/null ;; *) f sync_empty || echo "customers=5(full) packages=3(derived) subscriptions=2(full)" ;; esac; exit 0 ;; esac
             f pgdump_empty && exit 0; for i in $(seq 1 60); do echo "INSERT INTO t VALUES ($i,'dummy data row to make dump bigger than threshold');"; done ;;
           garage) case "$a" in *"status"*) echo "ID Hostname"; echo "0123456789abcdef host" ;; *"layout show"*) echo "0123456789abcdef" ;; *"key create"*) echo "Key ID: GKabc123"; echo "Secret key: s3cr3tvalue" ;; esac ;;
           crm-api)
             case "$a" in
               *"maung-garage:3900"*) f s3_unreachable && echo ERR || echo "HTTP 403" ;;
+              *"CRM_INTEGRATION_KEY?'ada'"*) f key_not_in_api && echo kosong || echo ada ;;
+              *"/api/integrations/crm/quotations/probe"*) cat "$STUB/crm_probe" 2>/dev/null || echo 404 ;;
               *"/api/auth/me"*) cat "$STUB/me_status" 2>/dev/null || echo 401 ;;
               *"crm/api/health"*) echo 200 ;;
               *"crm/api/me"*) echo 401 ;;

@@ -54,6 +54,23 @@ cd ~/maung-crm && git pull --ff-only origin main && bash scripts/set-export-key.
 3. RESULT: `cermin=customers=… subscriptions=… packages=… areas=…`. `packages/areas` bermode `derived` sampai WO menambah resource `packages`/`areas` (lihat `docs/PERMINTAAN-PERUBAHAN-WO.md`).
 Sinkron berjalan tiap `SYNC_INTERVAL_MIN` (30) menit, tarik penuh; data jaringan (ODP/port/VLAN/IP) dan biaya tidak disalin. Nomor telepon dinormalkan ke E.164 (`PHONE_DEFAULT_REGION=ID`).
 
+## E2. Go-live sekaligus (setelah WO selesai): cermin pelanggan + kirim katalog/penawaran ke WO
+Prasyarat: WO sudah live (e4b3d59 + Tahap 2a), `CRM_INTEGRATION_KEY` sudah di `~/maung-crm/.env` (nilai SAMA dengan `.env` WO; **tidak pernah ditempel di chat, log, atau commit** — skrip hanya melaporkan "terisi/kosong"). Jalankan di SSH `maung-apps`, user biasa (bukan root), **satu per satu**, tempel blok `RESULT` tiap langkah:
+1. Pasang image baru (membawa tampilan baru, cermin WO, Lead, Penawaran, Dashboard, kirim ke WO):
+```
+cd ~/maung-crm && git pull --ff-only origin main && bash scripts/update.sh </dev/null
+```
+   Bukti (e) di RESULT: `e_crm_integration_key_di_env=terisi`, `e_kunci_terbaca_crm_api=ada`, `e_wo_integrasi_probe=404 (OK…)` (401 = nilai kunci beda dengan WO; 503 = WO belum mengaktifkan integrasi), `e_antrean_kirim_ke_wo=pending:0 blocked:0`.
+2. Pasang kunci Export (cermin pelanggan; diketik tersembunyi):
+```
+cd ~/maung-crm && bash scripts/set-export-key.sh
+```
+3. Hanya bila belum pernah dijalankan (lihat E0): finalisasi Garage bersama.
+```
+cd ~/Maung-Wo-Inv && bash scripts/garage-platform.sh finalize </dev/null
+```
+Uji manual sesudahnya (login WO → /apps → CRM): buat Lead non-internet → Penawaran → Setujui → Tandai terkirim → di WO muncul penawaran QUOTED (Admin WO); Dashboard → panel "Kirim ke WO" harus `menunggu 0 · ditolak WO 0`. Sakelar darurat: `WO_SYNC_ENABLED=0` di `.env` lalu `docker compose up -d crm-api` (antrean tetap tersimpan).
+
 ## E. Yang sudah dan belum teruji
 - Teruji otomatis (CI): tes API, tes web (termasuk larangan HTML mentah), tes aturan compose, validasi compose, **alur `update.sh` dan `setup-deploy-key.sh` dengan docker/curl/ssh/git tiruan** (`tests/server-scripts/`: migrasi sukses, tiap jenis kegagalan + rollback, update kedua, host salah, root, `.env`/container WO berubah, secret tidak tercetak).
 - **Belum pernah dijalankan di server asli**: container sungguhan, Garage asli, Caddy `crm.caddy`, `/api/auth/me` WO asli (E2E memakai mock). Risiko ini dicatat; RESULT `update.sh` adalah buktinya.

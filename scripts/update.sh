@@ -23,7 +23,7 @@ COMMIT=""; TAG=""; PREV_TAG=""; WO_URL=""; LEGACY_IDS=""; PREV_MODE=no
 V_HOST=n/a; V_WOENV=n/a; V_WOCT=n/a; V_LOGIN_B=n/a; V_BRAND_B=n/a; V_LOGIN_A=n/a; V_BRAND_A=n/a
 V_PGDUMP=n/a; V_GARAGEBK=n/a; V_PULL=n/a; V_UP=n/a; V_GARAGE=n/a
 E_ME=n/a; E_INT=n/a; E_ME_NOTOKEN=n/a; E_PROBE_API=n/a; E_PROBE_WEB=n/a; E_NET=n/a; E_PORTS=n/a
-C_HEALTH=n/a; C_CRM=n/a; LEGACY_REMOVED=n/a; PORT3100=n/a; E_S3=n/a; G_EDGE=n/a
+C_HEALTH=n/a; C_CRM=n/a; E_KEYENV=n/a; E_KEYAPI=n/a; E_PROBE_INT=n/a; E_OUTBOX=n/a; LEGACY_REMOVED=n/a; PORT3100=n/a; E_S3=n/a; G_EDGE=n/a
 
 dc() { docker compose "$@"; }
 getenv() { grep -m1 "^$1=" "$ENVF" 2>/dev/null | cut -d= -f2- | tr -d "'\"" || true; }
@@ -77,6 +77,8 @@ result() {
   echo "# bukti (c) WO tidak terganggu"
   kv c_wo_login_sebelum "$V_LOGIN_B"; kv c_wo_login_sesudah "$V_LOGIN_A"; kv c_wo_api_branding_sebelum "$V_BRAND_B"; kv c_wo_api_branding_sesudah "$V_BRAND_A"
   kv wo_env_tidak_berubah "$V_WOENV"; kv wo_container_tidak_berubah "$V_WOCT"
+  echo "# bukti (e) integrasi CRM -> WO (nilai kunci TIDAK pernah dicetak)"
+  kv e_crm_integration_key_di_env "$E_KEYENV"; kv e_kunci_terbaca_crm_api "$E_KEYAPI"; kv e_wo_integrasi_probe "$E_PROBE_INT"; kv e_antrean_kirim_ke_wo "$E_OUTBOX"
   echo "# lain-lain"
   kv backup_pg_dump "$V_PGDUMP"; kv backup_garage "$V_GARAGEBK"; kv pull_image "$V_PULL"; kv garage_bersama "$V_GARAGE"; kv crm_api_ke_maung_garage_s3 "$E_S3"; kv d_maung_garage_di_maung_edge "${G_EDGE:-n/a}"
   kv container_lama_dihapus "$LEGACY_REMOVED"; kv port_3100_lama "$PORT3100"; kv rollback "$ROLLED"; kv log "$LOG"
@@ -246,6 +248,25 @@ V_LOGIN_A=$(http "$WO_URL/login"); V_BRAND_A=$(http "$WO_URL/api/branding")
 [ "$V_LOGIN_A" = 200 ] && [ "$V_BRAND_A" = 200 ] && ok "(c) WO tetap: /login=200 /api/branding=200" || { [ "$V_LOGIN_B" = 200 ] && [ "$V_BRAND_B" = 200 ] && fail "(c) WO berubah: /login=$V_LOGIN_A /api/branding=$V_BRAND_A"; warn "(c) WO tidak 200 sebelum maupun sesudah ($V_LOGIN_A/$V_BRAND_A)"; }
 [ "$(sha "$WO_DIR/.env")" = "$WO_ENV_SHA" ] && { V_WOENV=YA; ok ".env WO tidak berubah (checksum sama)"; } || { V_WOENV=TIDAK; fail ".env WO BERUBAH (checksum beda) — hentikan dan periksa"; }
 [ "$(wo_ids)" = "$WO_IDS_BEFORE" ] && { V_WOCT=YA; ok "container WO sama (nama, ID, status) seperti sebelum update"; } || { V_WOCT=TIDAK; fail "daftar/status container WO berubah selama update"; }
+
+# (e) Integrasi CRM → WO (PUT /api/integrations/crm/*): kunci hanya diperiksa keberadaannya; probe baca-saja dari DALAM crm-api (kunci tidak lewat argumen host)
+if [ -n "$(getenv CRM_INTEGRATION_KEY)" ]; then
+  E_KEYENV=terisi
+  r=$(dc exec -T crm-api node -e "console.log(process.env.CRM_INTEGRATION_KEY?'ada':'kosong')" 2>/dev/null | tr -d '\r\n'); E_KEYAPI="${r:-ERR}"
+  [ "$E_KEYAPI" = ada ] && ok "(e) kunci integrasi terbaca oleh crm-api (nilai tidak ditampilkan)" || warn "(e) crm-api tidak menerima CRM_INTEGRATION_KEY ($E_KEYAPI) — compose lama? jalankan update.sh versi terbaru"
+  r=$(dc exec -T crm-api node -e "fetch(process.env.WO_URL+'/api/integrations/crm/quotations/probe-crm-tidak-ada',{headers:{'x-api-key':process.env.CRM_INTEGRATION_KEY||''}}).then(r=>{console.log(r.status)}).catch(()=>console.log('ERR'))" 2>/dev/null | tr -d '\r\n'); E_PROBE_INT="${r:-ERR}"
+  case "$E_PROBE_INT" in
+    404) E_PROBE_INT="404 (OK: kunci diterima WO, penawaran uji tidak ada)"; ok "(e) WO menerima kunci integrasi (probe GET quotation tak dikenal = 404)" ;;
+    401) E_PROBE_INT="401 (kunci DITOLAK WO)"; warn "(e) WO menolak kunci integrasi (401) — nilai CRM_INTEGRATION_KEY di .env CRM harus SAMA dengan di .env WO. Kirim ke WO tidak berjalan; CRM lain normal." ;;
+    503) E_PROBE_INT="503 (integrasi nonaktif di WO)"; warn "(e) integrasi CRM nonaktif di WO (503: CRM_INTEGRATION_KEY belum terisi di .env WO / WO belum diperbarui)" ;;
+    *) warn "(e) probe integrasi ke WO tidak konklusif ($E_PROBE_INT)" ;;
+  esac
+  q() { dc exec -T postgres psql -U crm -d maung_crm -Atc "$1" 2>/dev/null | tr -d '\r'; }
+  E_OUTBOX=$(q "SELECT 'pending:'||count(*) FILTER (WHERE status='PENDING')||' blocked:'||count(*) FILTER (WHERE status='BLOCKED') FROM wo_outbox"); E_OUTBOX="${E_OUTBOX:-tidak-terbaca}"
+  case "$E_OUTBOX" in *blocked:0) ok "(e) antrean kirim ke WO: $E_OUTBOX" ;; *blocked:*) warn "(e) ada item kirim ke WO yang DITOLAK WO ($E_OUTBOX) — lihat CRM → Dashboard → Kirim ke WO" ;; *) warn "(e) antrean kirim tidak terbaca ($E_OUTBOX)" ;; esac
+else
+  E_KEYENV=kosong; warn "(e) CRM_INTEGRATION_KEY kosong di .env CRM → katalog/penawaran belum dikirim ke WO (isi kunci yang SAMA dengan WO, lalu jalankan ulang update.sh)"
+fi
 
 # ───────────────────────── 9. Finalisasi ─────────────────────────
 phase "Finalisasi (hapus container uji lama setelah semua bukti lolos)"

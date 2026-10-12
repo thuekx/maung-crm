@@ -2,18 +2,19 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import { z } from "zod";
 import { audit, pool } from "./db.js";
 import { isReviewer } from "./auth.js";
+import { enqueue } from "./woPush.js";
 
 const fail = (status: number, error: string) => Object.assign(new Error(error), { status });
 const ah = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
 
 const base = z.object({
-  name: z.string().trim().min(2, "Nama minimal 2 karakter").max(120),
+  name: z.string().trim().min(2, "Nama minimal 2 karakter").max(80, "Nama maksimal 80 karakter (batas WO)"),
   kind: z.enum(["SERVICE", "PRODUCT"]),
   unit: z.string().trim().min(1).max(20),
   price: z.number().min(0).max(1e12),
   // Opsional; string kosong = tanpa SKU
   sku: z.string().trim().max(40).regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/, "SKU hanya huruf/angka . _ - /").optional().or(z.literal("")),
-  description: z.string().trim().max(500).optional(),
+  description: z.string().trim().max(200).optional(), // batas WO
   active: z.boolean().optional(),
 });
 // Bawaan (satuan "unit", harga 0) hanya untuk item BARU; PATCH sebagian tidak boleh mereset nilai yang tidak dikirim.
@@ -54,6 +55,7 @@ catalogRoutes.post("/", ah(async (req, res) => {
     "INSERT INTO catalog_items (name,sku,kind,unit,price,description,active,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
     [b.name, sku, b.kind, b.unit, b.price, b.description ?? null, b.active ?? true, u.id]);
   await audit(u.id, "catalog", r.rows[0].id, "CREATE", null, b);
+  await enqueue("CATALOG", r.rows[0].id);
   res.status(201).json({ id: r.rows[0].id });
 }));
 
@@ -71,5 +73,6 @@ catalogRoutes.patch("/:id", ah(async (req, res) => {
   // Perubahan tidak mengubah penawaran lama: baris penawaran menyimpan salinan nama/harga saat dibuat.
   await pool.query("UPDATE catalog_items SET name=$2,kind=$3,unit=$4,price=$5,description=$6,active=$7,sku=$8,updated_at=now(),wo_synced_at=NULL WHERE id=$1", [id, m.name, m.kind, m.unit, m.price, m.description, m.active, m.sku]);
   await audit(u.id, "catalog", id, "UPDATE", { name: cur.name, price: Number(cur.price), active: cur.active }, m);
+  await enqueue("CATALOG", id);
   res.json({ ok: true });
 }));

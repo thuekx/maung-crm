@@ -34,6 +34,31 @@ function Bars({ rows, fmt = (n: number) => String(n) }: { rows: { label: string;
   );
 }
 
+function WoSync() {
+  const [st, setSt] = useState<any>(null);
+  const [msg, setMsg] = useState("");
+  const load = () => api("/wo-sync").then(setSt).catch(() => setSt(null)); // 403 untuk staf → panel tidak tampil
+  useEffect(() => { load(); }, []);
+  if (!st) return null;
+  const retry = async (id: number) => { try { await api(`/wo-sync/${id}/retry`, { method: "POST" }); setMsg(""); await load(); } catch (e: any) { setMsg(e.message); } };
+  return (
+    <div className="card space-y-2 text-sm">
+      <b>Kirim ke WO</b>
+      <p className={st.enabled ? "text-slate-600" : "text-amber-700"}>
+        {st.enabled ? `Aktif · menunggu ${st.pending} · ditolak WO ${st.blocked}` : st.keySet ? "Dimatikan (WO_SYNC_ENABLED=0)." : "Nonaktif: kunci integrasi belum diisi di server."}
+      </p>
+      {st.problems.map((p: any) => (
+        <div key={p.id} className="rounded-lg border border-slate-200 p-2 text-xs">
+          <div><b>{p.kind === "CATALOG" ? "Katalog" : "Penawaran"}</b> {p.crmId} · {p.status === "BLOCKED" ? "DITOLAK" : `percobaan ${p.attempts}`}</div>
+          <div className="text-red-700">{p.lastError}</div>
+          {p.status === "BLOCKED" && <button className="btn-ghost mt-1" onClick={() => retry(p.id)}>Coba lagi (setelah data diperbaiki)</button>}
+        </div>
+      ))}
+      {msg && <p className="text-red-600">{msg}</p>}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [f, setF] = useState({ from: daysAgo(29), to: iso(new Date()), marketing: "", area: "" });
   const [d, setD] = useState<any>(null);
@@ -96,6 +121,7 @@ export default function Dashboard() {
             <Bars rows={Object.entries(d.leads.byStage).map(([s, n]) => ({ label: STAGE[s] ?? s, value: n as number }))} /></div>
           <div className="card space-y-2"><b className="text-sm">Penawaran dibuat menurut status</b>
             <Bars rows={Object.entries(d.quotations.byStatus).map(([s, n]) => ({ label: QSTATUS[s] ?? s, value: n as number }))} /></div>
+          <WoSync />
           <p className="text-xs text-slate-500">Belum tersedia: Area Prospect, Partnership Opportunity, Estimated Potential MRR, dan konversi canvassing → lead (belum ada datanya di CRM).</p>
         </>
       )}

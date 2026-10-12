@@ -10,6 +10,7 @@ import { lookupByPhone, runSync, syncStatus } from "./woSync.js";
 import { normalizePhone } from "./phone.js";
 import { leadRoutes } from "./leads.js";
 import { dashboardRoutes } from "./dashboard.js";
+import { enqueueBackfill, outboxStatus, processOutbox, retryJob } from "./woPush.js";
 import { catalogRoutes } from "./catalog.js";
 import { quotationRoutes } from "./quotations.js";
 import { MAX_BYTES, compress, saveFile, sign, validateImage, verifySig } from "./files.js";
@@ -207,6 +208,22 @@ export function createApp() {
     if (!isReviewer(req.user!)) throw fail(403, "Hanya reviewer/Admin");
     res.json(await syncStatus());
   }));
+  // Kirim CRM → WO (katalog & penawaran): status antrean, coba lagi yang ditolak, jalankan sekarang.
+  r.get("/wo-sync", ah(async (req, res) => {
+    if (!isReviewer(req.user!)) throw fail(403, "Hanya reviewer/Admin");
+    res.json(await outboxStatus());
+  }));
+  r.post("/wo-sync/run", ah(async (req, res) => {
+    if (req.user!.role !== "ADMIN") throw fail(403, "Hanya Admin");
+    const queued = await enqueueBackfill();
+    res.json({ queued, ...(await processOutbox()), ...(await outboxStatus()) });
+  }));
+  r.post("/wo-sync/:id/retry", ah(async (req, res) => {
+    if (!isReviewer(req.user!)) throw fail(403, "Hanya reviewer/Admin");
+    if (!(await retryJob(idParam(req)))) throw fail(404, "Tidak ada item BLOCKED dengan ID itu");
+    res.json({ ok: true, ...(await processOutbox()) });
+  }));
+
   r.post("/sync/run", ah(async (req, res) => {
     if (req.user!.role !== "ADMIN") throw fail(403, "Hanya Admin");
     res.json(await runSync());

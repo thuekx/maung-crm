@@ -178,6 +178,23 @@ chk "K8 KEY_FILE bukan mode 600 ditolak" "has k8 'harus mode 600'"
 kprep k9; EXPECT_HOST_OVERRIDE=salah runk k9 "KEY_FILE=$S/home-k9/keyfile"
 chk "K9 host salah ditolak" "has k9 'HOST SALAH'"
 
+echo "### H* integrasi CRM → WO (bukti (e) di update.sh; kunci tidak pernah tercetak)"
+SECRET_I="kunciIntegrasiRAHASIA_9876543210abcdef"
+hprep() { setup $1; printf 'CRM_INTEGRATION_KEY=%s\nWO_SYNC_ENABLED=1\n' "$SECRET_I" >> $S/home-$1/maung-crm/.env; cp $S/home-$1/maung-crm/.env $S/env-asli-$1; own $S/home-$1 $S/stub-$1; }
+hprep h1; run h1
+chk "H1 kunci terisi: terbaca crm-api, WO menerima (404), antrean kosong → PASS" "has h1 'status=PASS' && has h1 'e_crm_integration_key_di_env=terisi' && has h1 'e_kunci_terbaca_crm_api=ada' && has h1 'e_wo_integrasi_probe=404 (OK' && has h1 'e_antrean_kirim_ke_wo=pending:0 blocked:0'"
+chk "H1 nilai kunci TIDAK tercetak di layar/log/panggilan docker; .env dipertahankan" "! grep -qF \"$SECRET_I\" $S/out-h1.txt && ! grep -rqF \"$SECRET_I\" $S/home-h1/maung-crm-logs/*.log && ! grep -qF \"$SECRET_I\" $S/stub-h1/calls.log && grep -q \"^CRM_INTEGRATION_KEY=$SECRET_I\\$\" $S/home-h1/maung-crm/.env"
+hprep h2; printf 401 > $S/stub-h2/crm_probe; own $S/stub-h2; run h2
+chk "H2 WO menolak kunci (401): update tetap PASS, peringatan jelas (kunci harus sama dengan WO)" "has h2 'status=PASS' && has h2 'kunci DITOLAK WO' && has h2 'harus SAMA'"
+hprep h3; printf 503 > $S/stub-h3/crm_probe; own $S/stub-h3; run h3
+chk "H3 integrasi nonaktif di WO (503): PASS + peringatan" "has h3 'status=PASS' && has h3 'integrasi nonaktif di WO'"
+setup h4; own $S/home-h4 $S/stub-h4; run h4
+chk "H4 kunci kosong: PASS + petunjuk isi kunci yang sama dengan WO" "has h4 'status=PASS' && has h4 'e_crm_integration_key_di_env=kosong' && has h4 'CRM_INTEGRATION_KEY kosong'"
+hprep h5; touch $S/stub-h5/key_not_in_api; own $S/stub-h5; run h5
+chk "H5 crm-api tidak menerima kunci (compose lama): diperingatkan" "has h5 'tidak menerima CRM_INTEGRATION_KEY'"
+hprep h6; printf 'pending:2 blocked:1' > $S/stub-h6/outbox; own $S/stub-h6; run h6
+chk "H6 ada item DITOLAK WO di antrean: peringatan + arah ke Dashboard" "has h6 'e_antrean_kirim_ke_wo=pending:2 blocked:1' && has h6 'DITOLAK WO'"
+
 echo; echo "UPDATE.SH TOTAL: lulus=$PASS gagal=$FAILC"; [ "$FAILC" = 0 ]
 
 ) || RC=1

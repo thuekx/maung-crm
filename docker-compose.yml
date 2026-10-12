@@ -46,6 +46,9 @@ services:
       # Cermin baca-saja pelanggan WO (Export API). Kosong = sinkron nonaktif. Kunci hanya di .env, tidak pernah di chat/commit.
       WO_EXPORT_API_KEY: ${WO_EXPORT_API_KEY:-}
       SYNC_INTERVAL_MIN: ${SYNC_INTERVAL_MIN:-30}
+      # Kirim katalog & penawaran CRM → WO (PUT /api/integrations/crm/*). Kunci = CRM_INTEGRATION_KEY di WO; hanya di .env, tidak pernah dicatat. WO_SYNC_ENABLED=0 = sakelar mati.
+      CRM_INTEGRATION_KEY: ${CRM_INTEGRATION_KEY:-}
+      WO_SYNC_ENABLED: ${WO_SYNC_ENABLED:-1}
       PHONE_DEFAULT_REGION: ${PHONE_DEFAULT_REGION:-ID}
     depends_on:
       postgres: { condition: service_healthy }
