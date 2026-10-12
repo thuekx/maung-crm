@@ -558,3 +558,34 @@ test("Jejak marketing permanen: snapshot id+nama pada lead & penawaran; tahan ga
   assert.deepEqual([q2again.marketingUserId, q2again.marketingName], ["u-rasyad", "Rasyad"]); // penawaran tidak ikut berganti nama pemilik
   assert.equal((await rq("tRasyad", "GET", `/quotations/${q2.id}`)).s, 200); // pembuat tetap bisa melihat
 });
+
+test("Jejak Field Report: id + nama pembuat (report, foto, follow-up) snapshot permanen, tahan hapus/ganti nama di WO, tak bisa diubah", async () => {
+  const j = async (r: Response) => ({ s: r.status, d: await r.json().catch(() => ({})) as any });
+  const rq = (tok: string, m: string, path: string, body?: unknown) => call(tok, m, "/crm/api" + path, body).then(j);
+  await pool.query("INSERT INTO wo_user_cache (user_id,name,role) VALUES ('u-nurman','Nurman','MKT') ON CONFLICT (user_id) DO UPDATE SET name='Nurman', role='MKT'");
+  const rep = (await rq("tNurman", "POST", "/reports", { activityType: "SURVEY", summary: "Jejak", picIds: ["u-nurman", "u-rasyad"] })).d;
+  assert.deepEqual([rep.createdBy, rep.createdByName], ["u-nurman", "Nurman"]);
+  const task = (await rq("tNurman", "POST", `/reports/${rep.id}/tasks`, { title: "Tugas jejak", picUserId: "u-rasyad", dueDate: "2030-01-01" })).d;
+  const f = new FormData();
+  f.set("original", new Blob([new Uint8Array(await png())]), "o.png");
+  assert.equal((await fetch(`${base}/crm/api/reports/${rep.id}/photos`, { method: "POST", headers: { Authorization: "Bearer tNurman" }, body: f })).status, 201);
+
+  // pengguna berganti nama lalu dihapus dari WO/cache → jejak tetap
+  await pool.query("UPDATE wo_user_cache SET name='Nama Baru' WHERE user_id='u-nurman'");
+  await pool.query("DELETE FROM wo_user_cache WHERE user_id IN ('u-nurman','u-rasyad')");
+  const d = (await rq("tMgr", "GET", `/reports/${rep.id}`)).d;
+  assert.deepEqual([d.createdBy, d.createdByName], ["u-nurman", "Nurman"]);
+  assert.deepEqual(d.pics.map((p: any) => [p.userId, p.name]), [["u-nurman", "Nurman"], ["u-rasyad", "Rasyad"]]); // PIC snapshot
+  assert.deepEqual([d.tasks[0].createdBy, d.tasks[0].createdByName, d.tasks[0].picName], ["u-nurman", "Nurman", "Rasyad"]);
+  assert.deepEqual([d.photos[0].createdBy, d.photos[0].createdByName], ["u-nurman", "Nurman"]);
+
+  // pengeditan biasa tidak mengubah jejak; mengubah lewat SQL ditolak di DB
+  assert.equal((await rq("tNurman", "PUT", `/reports/${rep.id}`, { activityType: "SURVEY", summary: "Jejak v2" })).s, 200);
+  assert.equal((await rq("tMgr", "GET", `/reports/${rep.id}`)).d.createdByName, "Nurman");
+  await assert.rejects(pool.query("UPDATE field_reports SET created_by_name='X' WHERE id=$1", [rep.id]), /jejak permanen/);
+  await assert.rejects(pool.query("UPDATE field_reports SET created_by='u-x' WHERE id=$1", [rep.id]), /jejak permanen/);
+  await assert.rejects(pool.query("UPDATE field_photos SET created_by_name='X' WHERE report_id=$1", [rep.id]), /jejak permanen/);
+  await assert.rejects(pool.query("UPDATE field_tasks SET created_by_name='X' WHERE id=$1", [task.id]), /jejak permanen/);
+  // aksi biasa pada task (selesai) tetap berjalan
+  assert.equal((await rq("tNurman", "PATCH", `/tasks/${task.id}`, { status: "DONE" })).s, 200);
+});

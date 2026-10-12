@@ -73,7 +73,7 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
     <div className="space-y-3">
       <div className="card space-y-1 text-sm">
         <div className="flex justify-between"><b>{ACTIVITY_TYPES[r.activityType]}{r.area ? ` · ${r.area}` : ""}</b><span className="text-xs">{RSTATUS[r.status] ?? r.status}</span></div>
-        <div className="text-slate-500">{fmtDate(r.activityAt)} · PIC: {r.pics.map((p: any) => p.name).join(", ")}</div>
+        <div className="text-slate-500">{fmtDate(r.activityAt)} · PIC: {r.pics.map((p: any) => p.name).join(", ")} · dibuat oleh {r.createdByName}</div>
         {r.counterpart && <div>Counterpart: {r.counterpart}</div>}
         {r.accountName && <div>Account: {r.accountName}</div>}
         {r.summary && <p className="whitespace-pre-wrap">{r.summary}</p>}

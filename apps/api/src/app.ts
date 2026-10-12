@@ -99,21 +99,21 @@ async function detail(row: any) {
     pool.query("SELECT user_id AS \"userId\", name FROM field_report_pics WHERE report_id=$1 ORDER BY name", [row.id]),
     pool.query("SELECT kind, text FROM field_report_items WHERE report_id=$1 ORDER BY position", [row.id]),
     pool.query("SELECT * FROM field_photos WHERE report_id=$1 AND deleted_at IS NULL ORDER BY taken_at", [row.id]),
-    pool.query("SELECT id, title, pic_user_id AS \"picUserId\", pic_name AS \"picName\", to_char(due_date,'YYYY-MM-DD') AS \"dueDate\", status FROM field_tasks WHERE report_id=$1 AND deleted_at IS NULL ORDER BY due_date", [row.id]),
+    pool.query("SELECT id, title, pic_user_id AS \"picUserId\", pic_name AS \"picName\", to_char(due_date,'YYYY-MM-DD') AS \"dueDate\", status, created_by AS \"createdBy\", created_by_name AS \"createdByName\" FROM field_tasks WHERE report_id=$1 AND deleted_at IS NULL ORDER BY due_date", [row.id]),
     pool.query("SELECT id, kind, note, actor_name AS \"actorName\", at FROM field_report_comments WHERE report_id=$1 ORDER BY at, id", [row.id]),
   ]);
   const grouped = (k: string) => items.rows.filter((i) => i.kind === k).map((i) => i.text);
   return {
     id: row.id, status: row.status, activityType: row.activity_type, activityAt: row.activity_at,
     counterpart: row.counterpart, accountName: row.account_name, area: row.area, branchId: row.branch_id,
-    summary: row.summary, nextAction: row.next_action, createdBy: row.created_by, submittedAt: row.submitted_at,
+    summary: row.summary, nextAction: row.next_action, createdBy: row.created_by, createdByName: row.created_by_name, submittedAt: row.submitted_at,
     checkin: row.gps_source
       ? { lat: row.gps_lat, lng: row.gps_lng, accuracy: row.gps_accuracy, at: row.gps_at, source: row.gps_source, locationStatus: row.location_status }
       : null,
     pics: pics.rows,
     items: { discussion: grouped("DISCUSSION"), agreement: grouped("AGREEMENT"), issues: grouped("ISSUE") },
     photos: photos.rows.map((p) => ({
-      id: p.id, caption: p.caption, takenAt: p.taken_at, source: p.gps_source, locationStatus: p.location_status,
+      id: p.id, caption: p.caption, takenAt: p.taken_at, createdBy: p.created_by, createdByName: p.created_by_name, source: p.gps_source, locationStatus: p.location_status,
       lat: p.gps_lat, lng: p.gps_lng, accuracy: p.gps_accuracy, gpsAt: p.gps_at,
       originalUrl: sign(p.id, "original"), watermarkUrl: p.watermark_path ? sign(p.id, "watermark") : null,
     })),
@@ -220,9 +220,9 @@ export function createApp() {
     try {
       await c.query("BEGIN");
       const r = await c.query(
-        `INSERT INTO field_reports (activity_type,activity_at,counterpart,account_name,area,branch_id,summary,next_action,created_by)
-         VALUES ($1,COALESCE($2,now()),$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-        [b.activityType, b.activityAt ?? null, b.counterpart ?? null, b.accountName ?? null, b.area ?? null, b.branchId ?? null, b.summary ?? null, b.nextAction ?? null, u.id],
+        `INSERT INTO field_reports (activity_type,activity_at,counterpart,account_name,area,branch_id,summary,next_action,created_by,created_by_name)
+         VALUES ($1,COALESCE($2,now()),$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        [b.activityType, b.activityAt ?? null, b.counterpart ?? null, b.accountName ?? null, b.area ?? null, b.branchId ?? null, b.summary ?? null, b.nextAction ?? null, u.id, u.name],
       );
       const id = r.rows[0].id as number;
       await writePics(c, id, picIds);
@@ -331,10 +331,10 @@ export function createApp() {
       ? locationStatus({ lat: meta.lat, lng: meta.lng, accuracy: meta.accuracy, at: meta.gpsAt, source: meta.source }, meta.takenAt)
       : "UNVERIFIED";
     const r = await pool.query(
-      `INSERT INTO field_photos (report_id,caption,original_path,watermark_path,mime,size_bytes,taken_at,gps_lat,gps_lng,gps_accuracy,gps_at,gps_source,location_status,created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+      `INSERT INTO field_photos (report_id,caption,original_path,watermark_path,mime,size_bytes,taken_at,gps_lat,gps_lng,gps_accuracy,gps_at,gps_source,location_status,created_by,created_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
       [id, meta.caption ?? null, origRel, wmRel, o.mime, orig.size, meta.takenAt, hasGps ? meta.lat : null, hasGps ? meta.lng : null,
-        hasGps ? meta.accuracy ?? null : null, hasGps ? meta.gpsAt ?? null : null, hasGps ? meta.source : null, status, u.id],
+        hasGps ? meta.accuracy ?? null : null, hasGps ? meta.gpsAt ?? null : null, hasGps ? meta.source : null, status, u.id, u.name],
     );
     await audit(u.id, "field_photo", r.rows[0].id, "CREATE", null, { reportId: id, source: meta.source ?? null, locationStatus: status });
     res.status(201).json({ id: r.rows[0].id, locationStatus: status });
@@ -403,8 +403,8 @@ export function createApp() {
     const t = taskSchema.parse(req.body);
     const [pic] = await picsFor([t.picUserId]);
     const r = await pool.query(
-      "INSERT INTO field_tasks (report_id,title,pic_user_id,pic_name,due_date,created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
-      [id, t.title, pic.user_id, pic.name, t.dueDate, u.id],
+      "INSERT INTO field_tasks (report_id,title,pic_user_id,pic_name,due_date,created_by,created_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+      [id, t.title, pic.user_id, pic.name, t.dueDate, u.id, u.name],
     );
     await audit(u.id, "field_task", r.rows[0].id, "CREATE", null, t);
     res.status(201).json({ id: r.rows[0].id });
