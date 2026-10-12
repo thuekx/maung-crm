@@ -19,8 +19,9 @@ export function IconChip({ name, tone = "blue", size = 18 }: { name: IconName; t
 }
 
 const AV = ["bg-brand-800 text-white", "bg-accent-500 text-brand-900", "bg-emerald-600 text-white", "bg-sky-600 text-white", "bg-violet-600 text-white", "bg-rose-600 text-white"];
-export function Avatar({ name, size = 40 }: { name: string; size?: number }) {
+export function Avatar({ name, size = 40, url }: { name: string; size?: number; url?: string | null }) {
   const t = (name || "?").trim();
+  if (url && url.startsWith("/")) return <img src={url} alt="" width={size} height={size} className="shrink-0 rounded-full object-cover" style={{ width: size, height: size }} onError={(e) => { e.currentTarget.style.display = "none"; }} />;
   const ini = t.split(/\s+/).slice(0, 2).map((w) => w.charAt(0)).join("").toUpperCase() || "?";
   const h = [...t].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % AV.length;
   return <span aria-hidden className={`inline-flex shrink-0 items-center justify-center rounded-full font-bold ${AV[h]}`} style={{ width: size, height: size, fontSize: size * 0.38 }}>{ini}</span>;

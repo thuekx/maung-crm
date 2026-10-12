@@ -35,7 +35,11 @@ export default function SettingsAdmin() {
       </Section>
 
       <Section icon="sync" title="Kirim ke WO" aside={<Badge tone={i.wo.enabled ? "green" : "amber"} dot>{i.wo.enabled ? "aktif" : i.wo.paused ? "dijeda" : "nonaktif"}</Badge>}>
-        <p className="text-sm text-slate-500">Katalog dan penawaran dikirim ke WO lewat antrean. Data demo tidak pernah dikirim. Jeda ini tidak menghapus antrean — pengiriman berlanjut saat diaktifkan lagi.</p>
+        <div className="space-y-1 text-sm text-slate-500">
+          <p><b>Cara kerja:</b> saat penawaran ditandai Terkirim, Diterima, atau Ditolak, dan saat katalog berubah, CRM memasukkannya ke <b>antrean</b> lalu mengirimkannya ke WO otomatis (cek tiap ±1 menit).</p>
+          <p><b>Jeda</b> menahan pengiriman sementara — pakai saat WO sedang pemeliharaan atau Anda sedang menguji dan belum ingin WO menerima data. CRM tetap bekerja normal; semua perubahan <b>tetap tercatat dan menunggu di antrean</b> (tidak ada yang hilang).</p>
+          <p>Saat jeda dimatikan, seluruh antrean terkirim berurutan. Data demo tidak pernah dikirim, dijeda atau tidak.</p>
+        </div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!s.woSync.paused} disabled={busy} onChange={(e) => save({ woSync: { paused: e.target.checked } }, e.target.checked ? "Pengiriman ke WO dijeda" : "Pengiriman ke WO dilanjutkan")} />Jeda pengiriman ke WO</label>
         <div>
           {row("Menunggu / ditolak WO", `${i.wo.pending} / ${i.wo.blocked}`)}

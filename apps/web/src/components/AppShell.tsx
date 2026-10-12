@@ -32,7 +32,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname() || "/";
   const { choice, set } = useTheme();
   const [back, setBack] = useState("Menu Utama");
-  const [name, setName] = useState("");
+  const [me, setMe] = useState<any>(null); // profil dari WO (/api/auth/me)
+  const [menu, setMenu] = useState(false);
+  const name = me?.name ?? "";
   const [logoOk, setLogoOk] = useState(true);
   const [admin, setAdmin] = useState(false); // menu Admin hanya untuk Admin ASLI (bukan peran lain / "bertindak sebagai")
 
@@ -44,7 +46,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     fetch("/api/launcher", { headers: h }).then((r) => (r.ok ? r.json() : null))
       .then((d) => { const l = d?.home?.backLabel; if (typeof l === "string" && l.trim()) setBack(l.trim().slice(0, 40)); }).catch(() => {});
     fetch("/api/auth/me", { headers: h }).then((r) => (r.ok ? r.json() : null))
-      .then((d) => { const n = d?.user?.name ?? d?.name; if (typeof n === "string" && n) setName(n.trim()); }).catch(() => {});
+      .then((d) => { const u = d?.user ?? d; if (u && typeof u.name === "string") setMe(u); }).catch(() => {});
   }, []);
 
   const active = (href: string) => (href === "/" ? path === "/" || path.startsWith("/reports") : path.startsWith(href));
@@ -85,8 +87,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div className="space-y-2 border-t border-white/10 p-3">
           <a href="/apps" className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white"><Icon name="chevronLeft" size={16} />{back}</a>
           <div className="flex items-center gap-2 px-1">
-            <Avatar name={name || "?"} size={34} />
-            <span className="min-w-0 flex-1 truncate text-sm">{name || "…"}</span>
+            <Link href="/profile" className="flex min-w-0 flex-1 items-center gap-2 rounded-lg p-1 hover:bg-white/5" title="Profil saya">
+              <Avatar name={name || "?"} size={34} url={me?.avatarUrl} />
+              <span className="min-w-0"><span className="block truncate text-sm">{name || "…"}</span><span className="block truncate text-[10px] text-white/50">Profil &amp; password</span></span>
+            </Link>
             {themeBtn("rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white")}
             <button className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white" aria-label="Keluar" title="Keluar" onClick={logout}><Icon name="logout" size={18} /></button>
           </div>
@@ -100,9 +104,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <span className="font-display text-lg font-semibold">CRM</span>
         <div className="ml-auto flex items-center gap-1">
           {themeBtn("rounded-lg p-2 text-white/80 hover:bg-white/10")}
-          <button className="flex items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2 hover:bg-white/10" onClick={logout} aria-label="Keluar" title="Keluar">
-            <Avatar name={name || "?"} size={28} /><Icon name="logout" size={16} className="text-white/70" />
-          </button>
+          <div className="relative">
+            <button className="flex items-center gap-1 rounded-full py-0.5 pl-0.5 pr-1.5 hover:bg-white/10" onClick={() => setMenu(!menu)} aria-label="Menu pengguna" aria-expanded={menu}>
+              <Avatar name={name || "?"} size={28} url={me?.avatarUrl} /><Icon name="chevronDown" size={14} className="text-white/70" />
+            </button>
+            {menu && (
+              <>
+                <div className="fixed inset-0 z-[1100]" onClick={() => setMenu(false)} />
+                <div className="absolute right-0 top-full z-[1200] mt-2 w-56 overflow-hidden rounded-xl bg-white text-sm text-slate-800 shadow-xl dark:bg-brand-900 dark:text-slate-100">
+                  <div className="border-b border-slate-100 px-3 py-2 dark:border-white/10"><div className="truncate font-semibold">{name || "…"}</div><div className="truncate text-xs text-slate-500">{me?.email}</div></div>
+                  <Link href="/profile" onClick={() => setMenu(false)} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-white/5"><Icon name="user" size={16} />Profil &amp; ganti password</Link>
+                  <button onClick={logout} className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-white/5"><Icon name="logout" size={16} />Keluar</button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
