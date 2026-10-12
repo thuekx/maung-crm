@@ -104,6 +104,23 @@ echo "### S13 pg_dump kosong"; setup s13; touch $S/stub-s13/pgdump_empty; own $S
 chk "dibatalkan sebelum mengubah apa pun" "has s13 'pg_dump gagal' && ! calls s13 'compose pull' && cmp -s $S/home-s13/maung-crm/.env $S/env-asli-s13"
 echo "### S14 up gagal"; setup s14; touch $S/stub-s14/up_fail; own $S/stub-s14; run s14
 chk "FAIL + diagnosis + rollback" "has s14 'docker compose up gagal' && has s14 'DIAGNOSIS' && calls s14 'compose rm -sf crm-web crm-api'"
+echo "### C* diagnosa jalur /crm (scripts/check-route.sh, baca-saja)"
+runc() { n=$1; shift; as_user "cd $S/home-$n/maung-crm && HOME=$S/home-$n STUB=$S/stub-$n PATH=$S/bin:\$PATH EXPECT_HOST=\${EXPECT_HOST_OVERRIDE:-$(hostname)} $* bash scripts/check-route.sh </dev/null" > $S/out-$n.txt 2>&1; echo $? > $S/rc-$n; }
+cprep() { setup $1; touch $S/stub-$1/crm_up; mkdir -p $S/home-$1/Maung-Wo-Inv/proxy/apps; own $S/stub-$1 $S/home-$1; }
+cprep c1; own $S/stub-c1; runc c1
+chk "C1 jalur belum dipasang → NEXT app-route.sh add crm (container sehat)" "has c1 'jalur belum dipasang' && has c1 'scripts/app-route.sh add crm' && has c1 'crm_api=healthy' && has c1 'perubahan_ke_sistem=TIDAK_ADA'"
+cprep c2; cp $REPO/deploy/crm.caddy $S/home-c2/Maung-Wo-Inv/proxy/apps/crm.caddy; own $S/home-c2; runc c2
+chk "C2 berkas ada tetapi belum dimuat Caddy → ulang app-route.sh" "has c2 'belum dimuat container Caddy' && has c2 'isi_sama_dengan_deploy_crm_caddy=ya'"
+cprep c3; cp $REPO/deploy/crm.caddy $S/home-c3/Maung-Wo-Inv/proxy/apps/crm.caddy; touch $S/stub-c3/route_in_container; own $S/home-c3 $S/stub-c3; runc c3
+chk "C3 Caddyfile aktif tanpa import → WO belum diperbarui" "has c3 \"belum memuat 'import /etc/caddy/apps/*.caddy'\""
+cprep c4; cp $REPO/deploy/crm.caddy $S/home-c4/Maung-Wo-Inv/proxy/apps/crm.caddy; touch $S/stub-c4/route_in_container $S/stub-c4/caddy_import; printf 200 > $S/stub-c4/caddy_health; printf 200 > $S/stub-c4/caddy_crm; own $S/home-c4 $S/stub-c4; runc c4
+chk "C4 semua beres → PASS, exit 0" "has c4 'status=PASS' && has c4 'UJI_MANUAL_PEMILIK' && [ \"\$(cat $S/rc-c4)\" = 0 ]"
+cprep c5; touch $S/stub-c5/unhealthy_crmapi_id; own $S/stub-c5; runc c5
+chk "C5 container CRM tidak sehat → diarahkan ke update.sh" "has c5 'container CRM bermasalah' && has c5 'PERBAIKI_CONTAINER_CRM'"
+cprep c6; EXPECT_HOST_OVERRIDE=salah runc c6
+chk "C6 host salah ditolak" "has c6 'HOST SALAH'"
+chk "C* tidak ada perintah yang mengubah (hanya baca: tak ada up/rm/stop/start/restart/pull)" "! grep -qE 'compose (up|rm|stop|start|restart|pull)|docker (rm|stop|start|restart)' $S/stub-c1/calls.log $S/stub-c4/calls.log"
+
 echo; echo "UPDATE.SH TOTAL: lulus=$PASS gagal=$FAILC"; [ "$FAILC" = 0 ]
 
 ) || RC=1

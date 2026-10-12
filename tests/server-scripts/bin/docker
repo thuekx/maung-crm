@@ -17,9 +17,16 @@ case "$cmd" in
     else
       if echo "$a" | grep -q crm-api; then cat "$STUB/probe_api" 2>/dev/null || echo 200; else cat "$STUB/probe_web" 2>/dev/null || echo 200; fi
     fi ;;
+  exec) # docker exec langsung ke container Caddy WO (baca-saja)
+    shift; a="$*"
+    case "$a" in
+      "ls /etc/caddy/apps") f route_in_container && echo crm.caddy ;;
+      *"grep -c"*) if f caddy_import; then echo 2; else echo 0; exit 1; fi ;;
+    esac ;;
   ps)
     a="$*"
-    if echo "$a" | grep -q 'label=com.docker.compose.project=maung-wo-inv'; then cat "$STUB/wo_ids"
+    if echo "$a" | grep -q 'service=caddy'; then echo caddyid
+    elif echo "$a" | grep -q 'label=com.docker.compose.project=maung-wo-inv'; then cat "$STUB/wo_ids"
     elif echo "$a" | grep -q 'label=com.docker.compose.project=maung-crm'; then
       f legacy_gone || { echo "legacy_api_id api"; echo "legacy_web_id web"; }
       echo "pg_id postgres"; echo "gar_id garage"; f crm_up && { echo "crmapi_id crm-api"; echo "crmweb_id crm-web"; }

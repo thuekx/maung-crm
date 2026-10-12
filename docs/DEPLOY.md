@@ -24,6 +24,13 @@ Bukti di RESULT (tanpa token): (a) dari container `crm-api`: `GET {WO_URL}/api/a
 4. Penerimaan manual pemilik: login WO → `/apps` → ikon CRM → CRM terbuka tanpa login ulang; 35 menit aktif tidak keluar sesi; kamera/GPS bekerja (HTTPS).
 5. Baru nyalakan "Tampil di beranda".
 
+## C2. `/crm` masih 404? (diagnosa baca-saja)
+404 itu wajar sampai jalur dipasang di Caddy WO: yang menjawab adalah aplikasi WO, bukan CRM. Satu perintah menunjukkan Anda di tahap mana (tidak mengubah apa pun di CRM maupun WO):
+```
+cd ~/maung-crm && git pull --ff-only origin main && bash scripts/check-route.sh </dev/null
+```
+Diagnosa yang mungkin: container CRM tidak sehat → `update.sh`; `proxy/apps/crm.caddy` belum ada → `cd ~/Maung-Wo-Inv && bash scripts/app-route.sh add crm </dev/null`; berkas ada tetapi belum dimuat Caddy → ulangi `app-route.sh add crm`; Caddyfile aktif WO belum memuat `import /etc/caddy/apps/*.caddy` → WO perlu diperbarui/dideploy oleh sesi WO. Yang tidak bisa diperiksa dari server: pendaftaran aplikasi dan Hak Akses di Admin WO (lakukan di browser).
+
 ## D. Rollback manual, backup, log
 - Otomatis saat gagal; manual: set `IMAGE_TAG` ke SHA terakhir-baik (`~/maung-crm-logs/state/last_ok_tag`) lalu `docker compose up -d crm-api crm-web` di `~/maung-crm`.
 - Backup: `~/maung-crm-logs/backup/` (7 `pg_dump` terakhir, 3 arsip Garage, `.env` CRM). Arsip Garage = salinan volume saat berjalan (crash-consistent, best-effort).
