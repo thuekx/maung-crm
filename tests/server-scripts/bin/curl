@@ -2,6 +2,10 @@
 a="$*"; url="${@: -1}"
 case "$a" in *api.github.com*) printf 'HTTP/2 200\r\nx-oauth-scopes: repo, read:packages\r\n\r\n'; exit 0 ;; esac
 f() { [ -f "$STUB/$1" ]; }
+echo "$*" >> "$STUB/curl_args.log"
+case "$url" in */api/export/customers*)  # kunci dikirim lewat stdin (-K -), bukan argumen
+  cfg=$(cat 2>/dev/null); echo "$cfg" | grep -q "x-api-key: $(cat "$STUB/export_key" 2>/dev/null)\"" || { printf 401; exit 0; }
+  cat "$STUB/export_status" 2>/dev/null || printf 200; exit 0 ;; esac
 case "$url" in
   */crm/api/health) cat "$STUB/caddy_health" 2>/dev/null || printf 404 ;;
   */crm) cat "$STUB/caddy_crm" 2>/dev/null || printf 308 ;;  # sebelum jalur dipasang: WO membalas redirect slash/404

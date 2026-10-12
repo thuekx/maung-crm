@@ -17,6 +17,20 @@ const USERS: Record<string, any> = {
   tAdmin: { id: "u-admin", name: "Admin", email: "admin@l1v.local", role: "ADMIN", subRole: "STAFF", features: [] },
 };
 let wo: http.Server, api: http.Server, base = "";
+// Export API WO tiruan: customers dibagi 2 halaman (cursor); packages/areas = 404 (belum ada di WO); kunci salah = 401.
+const EXPORT_KEY = "k-test-export";
+let exportData: Record<string, any[]> = {};
+const exportMock = (req: http.IncomingMessage, res: http.ServerResponse) => {
+  res.setHeader("content-type", "application/json");
+  if (req.headers["x-api-key"] !== EXPORT_KEY) { res.statusCode = 401; return void res.end("{}"); }
+  const u = new URL(req.url!, "http://x");
+  const rows = exportData[u.pathname.split("/").pop()!];
+  if (!rows) { res.statusCode = 404; return void res.end("{}"); }
+  const lim = Math.min(Number(u.searchParams.get("limit") ?? 1000), 2); // halaman kecil agar cursor teruji
+  const start = Number(u.searchParams.get("cursor") ?? 0);
+  const next = start + lim < rows.length ? String(start + lim) : null;
+  res.end(JSON.stringify({ data: rows.slice(start, start + lim), nextCursor: next }));
+};
 const { pool } = await import("./db.js");
 
 before(async () => {
@@ -27,6 +41,7 @@ before(async () => {
       res.statusCode = u ? 200 : 401;
       return void res.end(JSON.stringify(u ?? { error: "Belum login" }));
     }
+    if (req.url?.startsWith("/api/export/")) return void exportMock(req, res);
     res.statusCode = 404; res.end();
   });
   await new Promise<void>((r) => wo.listen(0, r));
@@ -178,4 +193,63 @@ test("soft delete", async () => {
   assert.equal((await call("tNurman", "DELETE", `/crm/api/reports/${d.id}`)).status, 204);
   assert.equal((await call("tNurman", "GET", `/crm/api/reports/${d.id}`)).status, 404);
   assert.equal((await pool.query("SELECT 1 FROM field_reports WHERE id=$1", [d.id])).rowCount, 1);
+});
+
+test("cermin WO: tarik penuh berhalaman, paket/area turunan, pencocokan nomor (E.164 semua negara), baris hilang dihapus", async () => {
+  const { runSync, syncStatus } = await import("./woSync.js");
+  process.env.WO_EXPORT_API_KEY = "";
+  assert.equal((await runSync()).skipped, "WO_EXPORT_API_KEY belum diisi"); // nonaktif tanpa kunci
+  process.env.WO_EXPORT_API_KEY = "salah";
+  const bad = await runSync();
+  assert.equal(bad.ok, false); assert.match(bad.errors.customers, /401/);
+  process.env.WO_EXPORT_API_KEY = EXPORT_KEY;
+  exportData = {
+    customers: [
+      { code: "C1", name: "Budi", phone: "0812-3456-7890", status: "PROSPECT", radiusStatus: "WAITING", packageName: "Home 20", areaName: "Bekasi", salesName: "Nurman", createdAt: "2026-10-01T00:00:00Z", odp: "RAHASIA", ip: "10.0.0.1" },
+      { code: "C2", name: "Siti", phone: "+62 812 3456 7890", status: "ACTIVE", radiusStatus: "ONLINE", packageName: "Home 20", areaName: "Bekasi", createdAt: "2026-01-01T00:00:00Z", activatedAt: "2026-01-05T00:00:00Z" },
+      { code: "C3", name: "Lim", phone: "+65 8123 4567", status: "ACTIVE", packageName: "Biz 100", areaName: "Jakarta", createdAt: "2026-02-01T00:00:00Z" },
+      { code: "C4", name: "Ahmad MY", phone: "012-3456789", status: "ACTIVE", packageName: "Biz 100", areaName: "Jakarta", createdAt: "2026-03-01T00:00:00Z" },
+      { code: "C5", name: "Tanpa Nomor", phone: "", status: "ACTIVE", packageName: "Home 10", createdAt: "2026-03-01T00:00:00Z" },
+    ],
+    subscriptions: [{ regNo: "SM0260001", name: "Budi", phone: "081234567890", packageName: "Home 20", source: "RADIUS", marketingName: "Nurman", customerCode: "C1", woNumber: null, createdAt: "2026-10-01T00:00:00Z", installFee: 999999 }],
+  };
+  const r1 = await runSync();
+  assert.deepEqual(r1, { ok: true, errors: {} });
+  assert.equal((await pool.query("SELECT count(*)::int n FROM wo_customers")).rows[0].n, 5);
+  assert.deepEqual((await pool.query("SELECT name FROM wo_packages ORDER BY name")).rows.map((x) => x.name), ["Biz 100", "Home 10", "Home 20"]);
+  assert.deepEqual((await pool.query("SELECT name FROM wo_areas ORDER BY name")).rows.map((x) => x.name), ["Bekasi", "Jakarta"]);
+  const st = await syncStatus();
+  assert.equal(st.resources.find((x: any) => x.resource === "packages")!.mode, "derived");
+  assert.ok(!JSON.stringify(st).includes(EXPORT_KEY)); // kunci tidak pernah keluar
+  assert.equal((await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name='wo_customers' AND column_name IN ('odp','ip')")).rowCount, 0); // data jaringan tidak disalin
+
+  // pencarian & pencocokan (butuh app.crm)
+  assert.equal((await call("tMktTanpaAkses", "GET", "/crm/api/customers/lookup?phone=0812")).status, 403);
+  const exact = await (await call("tNurman", "GET", "/crm/api/customers/lookup?phone=%2B62%20812-3456-7890")).json();
+  assert.equal(exact.normalized, "6281234567890");
+  assert.deepEqual(exact.exact.map((x: any) => x.code).sort(), ["C1", "C2"]); // 0812… dan +62812… = nomor yang sama
+  const sg = await (await call("tNurman", "GET", "/crm/api/customers/lookup?phone=0065%208123%204567")).json();
+  assert.deepEqual(sg.exact.map((x: any) => x.code), ["C3"]);
+  const my = await (await call("tNurman", "GET", "/crm/api/customers/lookup?phone=%2B60%2012-345%206789")).json();
+  assert.deepEqual(my.exact.map((x: any) => x.code), []); // C4 tersimpan tanpa kode negara → tidak otomatis
+  assert.deepEqual(my.weak.map((x: any) => x.code), ["C4"]); // hanya saran lemah
+  assert.equal((await call("tNurman", "GET", "/crm/api/customers/lookup?phone=12")).status, 400);
+  const byName = await (await call("tNurman", "GET", "/crm/api/customers?q=sit")).json();
+  assert.deepEqual(byName.map((x: any) => x.code), ["C2"]);
+  assert.equal((await (await call("tNurman", "GET", "/crm/api/customers?q=%25")).json()).length, 0); // % tidak jadi wildcard
+  const det = await (await call("tNurman", "GET", "/crm/api/customers/C1")).json();
+  assert.equal(det.subscriptions[0].regNo, "SM0260001"); assert.ok(!("installFee" in det.subscriptions[0]));
+  assert.equal((await call("tNurman", "GET", "/crm/api/customers/NOPE")).status, 404);
+  assert.equal((await call("tNurman", "GET", "/crm/api/sync/status")).status, 403); // staf bukan reviewer
+  assert.equal((await call("tMgr", "GET", "/crm/api/sync/status")).status, 200);
+  assert.equal((await call("tMgr", "POST", "/crm/api/sync/run")).status, 403); // hanya Admin
+  assert.equal((await call("tAdmin", "POST", "/crm/api/sync/run")).status, 200);
+
+  // siklus berikutnya: C2 hilang & paket baru dari endpoint packages → cermin mengikuti WO (penuh)
+  exportData.customers = exportData.customers.filter((c) => c.code !== "C2");
+  exportData.packages = [{ name: "Home 20", kind: "INTERNET", speed: "20 Mbps", priceSell: 250000, active: true }, { name: "Sewa WiFi", kind: "SERVICE", unit: "bulan", priceSell: 100000, active: true }];
+  assert.equal((await runSync()).ok, true);
+  assert.equal((await pool.query("SELECT 1 FROM wo_customers WHERE code='C2'")).rowCount, 0);
+  assert.deepEqual((await pool.query("SELECT name, kind, origin FROM wo_packages ORDER BY name")).rows, [{ name: "Home 20", kind: "INTERNET", origin: "EXPORT" }, { name: "Sewa WiFi", kind: "SERVICE", origin: "EXPORT" }]);
+  delete process.env.WO_EXPORT_API_KEY;
 });

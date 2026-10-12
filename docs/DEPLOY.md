@@ -44,6 +44,16 @@ Kontrak (sisi WO: `platform/garage/README.md`, `scripts/garage-platform.sh`, `ga
 4. WO: `bash scripts/garage-platform.sh finalize </dev/null` (lepas alias sementara).
 **Jangan** menjalankan `update.sh` CRM versi lama setelah langkah 2 (menyalakan Garage kedua pada volume yang sama), dan jangan pernah `docker compose down -v` di CRM selama volume Garage lama belum difinalisasi. Selama langkah 2–3 jangan memicu pembaruan CRM lain; `GARAGE_RPC_SECRET` lama di `.env` CRM dibiarkan (aman dihapus setelah `finalize`).
 
+## E1. Cermin pelanggan WO (Export API, baca-saja) — pasang kunci
+Prasyarat: `update.sh` versi ini sudah dijalankan (compose meneruskan `WO_EXPORT_API_KEY`), dan di WO `EXPORT_API_KEY` sudah terisi (Admin WO → API Sistem).
+1. Di SSH `maung-apps` (user biasa, **bukan** root), satu perintah:
+```
+cd ~/maung-crm && git pull --ff-only origin main && bash scripts/set-export-key.sh
+```
+2. Saat diminta, **ketik/tempel kunci Export WO** lalu Enter — layar tidak menampilkannya (tidak masuk riwayat shell, chat, atau log). Skrip menguji kunci ke WO (baca-saja), membackup `.env`, menyimpan kunci (mode 600), membuat ulang `crm-api`, menunggu sinkron pertama, dan **rollback otomatis** bila gagal.
+3. RESULT: `cermin=customers=… subscriptions=… packages=… areas=…`. `packages/areas` bermode `derived` sampai WO menambah resource `packages`/`areas` (lihat `docs/PERMINTAAN-PERUBAHAN-WO.md`).
+Sinkron berjalan tiap `SYNC_INTERVAL_MIN` (30) menit, tarik penuh; data jaringan (ODP/port/VLAN/IP) dan biaya tidak disalin. Nomor telepon dinormalkan ke E.164 (`PHONE_DEFAULT_REGION=ID`).
+
 ## E. Yang sudah dan belum teruji
 - Teruji otomatis (CI): tes API, tes web (termasuk larangan HTML mentah), tes aturan compose, validasi compose, **alur `update.sh` dan `setup-deploy-key.sh` dengan docker/curl/ssh/git tiruan** (`tests/server-scripts/`: migrasi sukses, tiap jenis kegagalan + rollback, update kedua, host salah, root, `.env`/container WO berubah, secret tidak tercetak).
 - **Belum pernah dijalankan di server asli**: container sungguhan, Garage asli, Caddy `crm.caddy`, `/api/auth/me` WO asli (E2E memakai mock). Risiko ini dicatat; RESULT `update.sh` adalah buktinya.

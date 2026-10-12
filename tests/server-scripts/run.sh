@@ -152,6 +152,32 @@ cprep c8; printf 'handle /crm/* {\n\treverse_proxy crm-web:3001\n}\n' > $S/home-
 chk "C8 aturan berbeda (port lain) → BEDA-ATURAN + saran pasang ulang" "has c8 'isi_sama_dengan_deploy_crm_caddy=BEDA-ATURAN' && has c8 'app-route.sh add crm'"
 chk "C* tidak ada perintah yang mengubah (hanya baca: tak ada up/rm/stop/start/restart/pull)" "! grep -qE 'compose (up|rm|stop|start|restart|pull)|docker (rm|stop|start|restart)' $S/stub-c1/calls.log $S/stub-c4/calls.log"
 
+echo "### K* scripts/set-export-key.sh (pasang kunci Export WO; kunci tidak pernah tercetak)"
+SECRET_K="kunciExportRAHASIA_1234567890abcdef"
+runk() { n=$1; shift; as_user "cd $S/home-$n/maung-crm && HOME=$S/home-$n STUB=$S/stub-$n PATH=$S/bin:\$PATH EXPECT_HOST=\${EXPECT_HOST_OVERRIDE:-$(hostname)} WAIT_API=4 WAIT_SYNC=4 POLL_INTERVAL=1 $* bash scripts/set-export-key.sh </dev/null" > $S/out-$n.txt 2>&1; echo $? > $S/rc-$n; }
+kprep() { # kprep <nama> [isi-kunci]
+  setup $1; touch $S/stub-$1/crm_up; printf '%s' "$SECRET_K" > $S/stub-$1/export_key; printf '%s\n' "${2-$SECRET_K}" > $S/home-$1/keyfile; chmod 600 $S/home-$1/keyfile; own $S/stub-$1 $S/home-$1; }
+kprep k1; runk k1 "KEY_FILE=$S/home-k1/keyfile"
+chk "K1 PASS: kunci diterima WO (200), tersimpan di .env mode 600, cermin terisi" "has k1 'status=PASS' && has k1 'export_api_wo_http=200' && grep -q \"^WO_EXPORT_API_KEY=$SECRET_K\\$\" $S/home-k1/maung-crm/.env && [ \"\$(stat -c%a $S/home-k1/maung-crm/.env)\" = 600 ] && has k1 'cermin=customers=5(full)' && has k1 'NEXT=CEK_HALAMAN_CRM'"
+chk "K1 kunci TIDAK tercetak di layar/log dan TIDAK ada di argumen perintah" "! grep -qF \"$SECRET_K\" $S/out-k1.txt && ! grep -rqF \"$SECRET_K\" $S/home-k1/maung-crm-logs/*.log && ! grep -qF \"$SECRET_K\" $S/stub-k1/curl_args.log && ! grep -qF \"$SECRET_K\" $S/stub-k1/calls.log && has k1 'kunci_dicetak=TIDAK'"
+chk "K1 backup .env ada (mode 600), secret lain di .env utuh, crm-api dibuat ulang tanpa sentuh WO" "ls $S/home-k1/maung-crm-logs/backup/crm-env-*.bak >/dev/null && [ \"\$(stat -c%a \$(ls $S/home-k1/maung-crm-logs/backup/crm-env-*.bak | head -1))\" = 600 ] && grep -q pgpass_asli_123 $S/home-k1/maung-crm/.env && calls k1 'compose up -d crm-api' && has k1 'perubahan_ke_WO=TIDAK_ADA' && grep -q '^SYNC_INTERVAL_MIN=30' $S/home-k1/maung-crm/.env"
+kprep k2; printf 401 > $S/stub-k2/export_status; printf '%s' "lain" > $S/stub-k2/export_key; own $S/stub-k2; runk k2 "KEY_FILE=$S/home-k2/keyfile"
+chk "K2 kunci ditolak WO (401) → FAIL, .env TIDAK diubah, tanpa up" "has k2 'status=FAIL' && has k2 'WO menolak kunci (401)' && cmp -s $S/home-k2/maung-crm/.env $S/env-asli-k2 && ! calls k2 'compose up'"
+kprep k3; printf 503 > $S/stub-k3/export_status; own $S/stub-k3; runk k3 "KEY_FILE=$S/home-k3/keyfile"
+chk "K3 Export API nonaktif di WO (503) → FAIL jelas, .env utuh" "has k3 'status=FAIL' && has k3 'nonaktif di WO' && cmp -s $S/home-k3/maung-crm/.env $S/env-asli-k3"
+kprep k4; touch $S/stub-k4/sync_empty; printf 'customers: Export API menolak kunci (401)' > $S/stub-k4/sync_err; own $S/stub-k4; runk k4 "KEY_FILE=$S/home-k4/keyfile"
+chk "K4 cermin tak terisi → FAIL + ROLLBACK .env + crm-api dibuat ulang; galat sinkron ditampilkan" "has k4 'status=FAIL' && has k4 'rollback=ya' && cmp -s $S/home-k4/maung-crm/.env $S/env-asli-k4 && has k4 'Export API menolak kunci' && [ \"\$(ncalls k4 'compose up -d crm-api')\" -ge 2 ]"
+kprep k5; sed -i '/WO_EXPORT_API_KEY/d' $S/home-k5/maung-crm/docker-compose.yml; own $S/home-k5; runk k5 "KEY_FILE=$S/home-k5/keyfile"
+chk "K5 compose belum meneruskan WO_EXPORT_API_KEY → diarahkan ke update.sh, tanpa perubahan" "has k5 'status=FAIL' && has k5 'scripts/update.sh' && cmp -s $S/home-k5/maung-crm/.env $S/env-asli-k5"
+kprep k6 "pendek"; runk k6 "KEY_FILE=$S/home-k6/keyfile"
+chk "K6 kunci terlalu pendek ditolak" "has k6 'terlalu pendek' && cmp -s $S/home-k6/maung-crm/.env $S/env-asli-k6"
+kprep k7 'ada spasi&simbol|x1234567890123456'; runk k7 "KEY_FILE=$S/home-k7/keyfile"
+chk "K7 karakter terlarang ditolak" "has k7 'tidak diizinkan' && cmp -s $S/home-k7/maung-crm/.env $S/env-asli-k7"
+kprep k8; chmod 644 $S/home-k8/keyfile; runk k8 "KEY_FILE=$S/home-k8/keyfile"
+chk "K8 KEY_FILE bukan mode 600 ditolak" "has k8 'harus mode 600'"
+kprep k9; EXPECT_HOST_OVERRIDE=salah runk k9 "KEY_FILE=$S/home-k9/keyfile"
+chk "K9 host salah ditolak" "has k9 'HOST SALAH'"
+
 echo; echo "UPDATE.SH TOTAL: lulus=$PASS gagal=$FAILC"; [ "$FAILC" = 0 ]
 
 ) || RC=1

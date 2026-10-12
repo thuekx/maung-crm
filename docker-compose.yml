@@ -43,6 +43,10 @@ services:
       S3_BUCKET: ${S3_BUCKET:-crm-photos}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      # Cermin baca-saja pelanggan WO (Export API). Kosong = sinkron nonaktif. Kunci hanya di .env, tidak pernah di chat/commit.
+      WO_EXPORT_API_KEY: ${WO_EXPORT_API_KEY:-}
+      SYNC_INTERVAL_MIN: ${SYNC_INTERVAL_MIN:-30}
+      PHONE_DEFAULT_REGION: ${PHONE_DEFAULT_REGION:-ID}
     depends_on:
       postgres: { condition: service_healthy }
     networks: [default, edge, storage]

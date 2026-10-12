@@ -6,6 +6,8 @@ import { authenticate, isReviewer, requireCrm, type Principal } from "./auth.js"
 import { API_BASE } from "./config.js";
 import { locationStatus, validCoords } from "./gps.js";
 import { storage } from "./storage.js";
+import { lookupByPhone, runSync, syncStatus } from "./woSync.js";
+import { normalizePhone } from "./phone.js";
 import { MAX_BYTES, compress, saveFile, sign, validateImage, verifySig } from "./files.js";
 
 const ACTIVITY_TYPES = ["CANVASSING", "MEETING", "FOLLOW_UP", "SURVEY", "PARTNERSHIP", "COMMUNITY_ENGAGEMENT", "LAINNYA"] as const;
@@ -151,6 +153,52 @@ export function createApp() {
   r.get("/pics", ah(async (_req, res) => {
     const r = await pool.query("SELECT user_id AS id, name FROM wo_user_cache WHERE role IN ('MKT','ADMIN') ORDER BY name");
     res.json(r.rows);
+  }));
+
+  // ── Cermin baca-saja data pelanggan Maung WO (tarik berkala lewat Export API) ──
+  const CUST_COLS = `code, name, phone, email, address, package_name AS "packageName", status, radius_status AS "radiusStatus", sales_name AS "salesName",
+    area_name AS "areaName", wo_created_at AS "createdAt", activated_at AS "activatedAt"`;
+
+  r.get("/customers", ah(async (req, res) => {
+    const q = String(req.query.q ?? "").trim();
+    if (q.length < 2) return void res.json([]);
+    const p = normalizePhone(q);
+    const args: unknown[] = [`%${q.toLowerCase().replace(/[\\%_]/g, (c) => "\\" + c)}%`];
+    const conds = ["lower(name) LIKE $1", "lower(code) LIKE $1"];
+    if (p.digits.length >= 5) { args.push(p.e164 ?? p.digits); conds.push(p.e164 ? `phone_norm=$${args.length}` : `phone_digits=$${args.length}`); }
+    const rows = await pool.query(`SELECT ${CUST_COLS} FROM wo_customers WHERE ${conds.join(" OR ")} ORDER BY name LIMIT 20`, args);
+    res.json(rows.rows);
+  }));
+
+  r.get("/customers/lookup", ah(async (req, res) => {
+    const phone = String(req.query.phone ?? "");
+    if (phone.replace(/\D/g, "").length < 5) throw fail(400, "Nomor telepon terlalu pendek");
+    res.json(await lookupByPhone(phone));
+  }));
+
+  r.get("/customers/:code", ah(async (req, res) => {
+    const c = await pool.query(`SELECT ${CUST_COLS} FROM wo_customers WHERE code=$1`, [String(req.params.code)]);
+    if (!c.rows[0]) throw fail(404, "Pelanggan tidak ditemukan di cermin WO");
+    const subs = await pool.query(
+      `SELECT reg_no AS "regNo", form_date AS "formDate", package_name AS "packageName", source, marketing_name AS "marketingName", wo_number AS "woNumber"
+       FROM wo_subscriptions WHERE customer_code=$1 ORDER BY form_date DESC NULLS LAST`, [c.rows[0].code]);
+    res.json({ ...c.rows[0], subscriptions: subs.rows });
+  }));
+
+  r.get("/wo/packages", ah(async (_req, res) => {
+    res.json((await pool.query(`SELECT name, kind, speed, price_sell AS "priceSell", unit, active, origin FROM wo_packages ORDER BY name`)).rows);
+  }));
+  r.get("/wo/areas", ah(async (_req, res) => {
+    res.json((await pool.query(`SELECT name, code, origin FROM wo_areas ORDER BY name`)).rows);
+  }));
+
+  r.get("/sync/status", ah(async (req, res) => {
+    if (!isReviewer(req.user!)) throw fail(403, "Hanya reviewer/Admin");
+    res.json(await syncStatus());
+  }));
+  r.post("/sync/run", ah(async (req, res) => {
+    if (req.user!.role !== "ADMIN") throw fail(403, "Hanya Admin");
+    res.json(await runSync());
   }));
 
   r.post("/reports", ah(async (req, res) => {
