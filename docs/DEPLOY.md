@@ -61,10 +61,11 @@ Prasyarat: WO sudah live (e4b3d59 + Tahap 2a), `CRM_INTEGRATION_KEY` sudah di `~
 cd ~/maung-crm && git pull --ff-only origin main && bash scripts/update.sh </dev/null
 ```
    Bukti (e) di RESULT: `e_crm_integration_key_di_env=terisi`, `e_kunci_terbaca_crm_api=ada`, `e_wo_integrasi_probe=404 (OK…)` (401 = nilai kunci beda dengan WO; 503 = WO belum mengaktifkan integrasi), `e_antrean_kirim_ke_wo=pending:0 blocked:0`.
-2. Pasang kunci Export (cermin pelanggan; diketik tersembunyi):
+2. Pasang kunci Export (cermin pelanggan WO → CRM; **kunci berbeda** dari `CRM_INTEGRATION_KEY`). Tanpa mengetik, dibaca baca-saja dari `.env` WO (nilai tidak ditampilkan; `.env` WO tidak diubah):
 ```
-cd ~/maung-crm && bash scripts/set-export-key.sh
+cd ~/maung-crm && bash scripts/set-export-key.sh --from-wo-env
 ```
+   (Tanpa opsi itu skrip meminta kunci diketik tersembunyi. Aman diulang; langkah ini tidak mengekspor/mengubah apa pun di WO.)
 3. Hanya bila belum pernah dijalankan (lihat E0): finalisasi Garage bersama.
 ```
 cd ~/Maung-Wo-Inv && bash scripts/garage-platform.sh finalize </dev/null

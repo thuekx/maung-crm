@@ -154,7 +154,7 @@ chk "C* tidak ada perintah yang mengubah (hanya baca: tak ada up/rm/stop/start/r
 
 echo "### K* scripts/set-export-key.sh (pasang kunci Export WO; kunci tidak pernah tercetak)"
 SECRET_K="kunciExportRAHASIA_1234567890abcdef"
-runk() { n=$1; shift; as_user "cd $S/home-$n/maung-crm && HOME=$S/home-$n STUB=$S/stub-$n PATH=$S/bin:\$PATH EXPECT_HOST=\${EXPECT_HOST_OVERRIDE:-$(hostname)} WAIT_API=4 WAIT_SYNC=4 POLL_INTERVAL=1 $* bash scripts/set-export-key.sh </dev/null" > $S/out-$n.txt 2>&1; echo $? > $S/rc-$n; }
+runk() { n=$1; shift; as_user "cd $S/home-$n/maung-crm && HOME=$S/home-$n STUB=$S/stub-$n PATH=$S/bin:\$PATH EXPECT_HOST=\${EXPECT_HOST_OVERRIDE:-$(hostname)} WAIT_API=4 WAIT_SYNC=4 POLL_INTERVAL=1 $* bash scripts/set-export-key.sh ${ARGS:-} </dev/null" > $S/out-$n.txt 2>&1; echo $? > $S/rc-$n; }
 kprep() { # kprep <nama> [isi-kunci]
   setup $1; touch $S/stub-$1/crm_up; printf '%s' "$SECRET_K" > $S/stub-$1/export_key; printf '%s\n' "${2-$SECRET_K}" > $S/home-$1/keyfile; chmod 600 $S/home-$1/keyfile; own $S/stub-$1 $S/home-$1; }
 kprep k1; runk k1 "KEY_FILE=$S/home-k1/keyfile"
@@ -178,6 +178,10 @@ chk "K8 KEY_FILE bukan mode 600 ditolak" "has k8 'harus mode 600'"
 kprep k9; EXPECT_HOST_OVERRIDE=salah runk k9 "KEY_FILE=$S/home-k9/keyfile"
 chk "K9 host salah ditolak" "has k9 'HOST SALAH'"
 
+kprep k10; printf 'WEB_DOMAIN=x\nEXPORT_API_KEY=%s\nJWT_SECRET=RAHASIA_WO\n' "$SECRET_K" > $S/home-k10/Maung-Wo-Inv/.env; cp $S/home-k10/Maung-Wo-Inv/.env $S/wo-env-k10; own $S/home-k10; ARGS=--from-wo-env runk k10
+chk "K10 --from-wo-env: kunci dibaca dari .env WO (baca-saja), tersimpan di .env CRM, PASS, tak tercetak, .env WO tak berubah" "has k10 'status=PASS' && has k10 'sumber_kunci=dibaca dari .env WO' && grep -q \"^WO_EXPORT_API_KEY=$SECRET_K\\$\" $S/home-k10/maung-crm/.env && ! grep -qF \"$SECRET_K\" $S/out-k10.txt && ! grep -rqF \"$SECRET_K\" $S/home-k10/maung-crm-logs/*.log && cmp -s $S/home-k10/Maung-Wo-Inv/.env $S/wo-env-k10"
+kprep k11; printf 'WEB_DOMAIN=x\nJWT_SECRET=RAHASIA_WO\n' > $S/home-k11/Maung-Wo-Inv/.env; own $S/home-k11; ARGS=--from-wo-env runk k11
+chk "K11 EXPORT_API_KEY tidak ada di .env WO → gagal jelas, .env CRM utuh" "has k11 'status=FAIL' && has k11 'EXPORT_API_KEY kosong/tidak ada' && cmp -s $S/home-k11/maung-crm/.env $S/env-asli-k11"
 echo "### H* integrasi CRM → WO (bukti (e) di update.sh; kunci tidak pernah tercetak)"
 SECRET_I="kunciIntegrasiRAHASIA_9876543210abcdef"
 hprep() { setup $1; printf 'CRM_INTEGRATION_KEY=%s\nWO_SYNC_ENABLED=1\n' "$SECRET_I" >> $S/home-$1/maung-crm/.env; cp $S/home-$1/maung-crm/.env $S/env-asli-$1; own $S/home-$1 $S/stub-$1; }

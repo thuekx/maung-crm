@@ -3,6 +3,7 @@
 # Kunci DIKETIK di layar tanpa tampil (tidak masuk riwayat shell/chat/log). Nilainya tidak pernah dicetak.
 # Prasyarat: update.sh versi terbaru sudah dijalankan (compose meneruskan WO_EXPORT_API_KEY ke crm-api).
 # Jalankan:  cd ~/maung-crm && git pull --ff-only origin main && bash scripts/set-export-key.sh
+#   Tanpa mengetik: bash scripts/set-export-key.sh --from-wo-env  (membaca EXPORT_API_KEY dari ~/Maung-Wo-Inv/.env, BACA-SAJA; nilai tidak ditampilkan)
 #   (opsional untuk otomasi: KEY_FILE=/jalur/berkas-mode-600 bash scripts/set-export-key.sh)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,7 +17,7 @@ exec > >(tee -a "$LOG") 2>&1
 cd "$HERE" || exit 1
 ENVF="$HERE/.env"; ENV_BAK="$BK_DIR/crm-env-$TS.bak"
 STATUS=FAIL; REASON=""; ROLL_ARMED=0; ROLLED=no
-V_WOHTTP=n/a; V_API=n/a; V_MIRROR=n/a; KEY=""
+V_WOHTTP=n/a; V_API=n/a; V_MIRROR=n/a; KEY=""; V_SRC=n/a; MODE="${1:-}"; WO_DIR="${WO_DIR:-$HOME/Maung-Wo-Inv}"
 dc() { docker compose "$@"; }
 getenv() { grep -m1 "^$1=" "$ENVF" 2>/dev/null | cut -d= -f2- | tr -d "'\"" || true; }
 setenv() { local t; t=$(mktemp "$ENVF.XXXXXX"); chmod 600 "$t"; { grep -v "^$1=" "$ENVF" || true; printf '%s=%s\n' "$1" "$2"; } > "$t" && mv "$t" "$ENVF"; }
@@ -28,7 +29,7 @@ result() {
   banner "RESULT"
   kv status "$STATUS"; kv reason "${REASON:--}"; kv host "$(hostname)"; kv dir "$HERE"
   kv export_api_wo_http "$V_WOHTTP"; kv crm_api "$V_API"; kv cermin "$V_MIRROR"
-  kv kunci_dicetak TIDAK; kv rollback "$ROLLED"; kv backup_env "$([ -f "$ENV_BAK" ] && echo "$ENV_BAK" || echo -)"
+  kv sumber_kunci "$V_SRC"; kv kunci_dicetak TIDAK; kv rollback "$ROLLED"; kv backup_env "$([ -f "$ENV_BAK" ] && echo "$ENV_BAK" || echo -)"
   kv perubahan_ke_WO TIDAK_ADA; kv log "$LOG"
   for w in "${WARNS[@]:-}"; do [ -n "$w" ] && printf '  - %s\n' "$w"; done
   echo "RESULT : PASANG KUNCI EXPORT ${STATUS} / NEXT=${NEXT:-tidak-ada}"
@@ -56,13 +57,17 @@ WO_URL=$(getenv WO_URL); [ -n "$WO_URL" ] || fail "WO_URL kosong di .env CRM"
 ok "guard lolos (WO_URL=$WO_URL)"
 
 phase "Kunci Export (tidak ditampilkan)"
-if [ -n "${KEY_FILE:-}" ]; then
+if [ "$MODE" = "--from-wo-env" ]; then
+  [ -f "$WO_DIR/.env" ] || fail "$WO_DIR/.env tidak ada (WO belum terpasang di folder itu?)"
+  KEY=$(grep -m1 '^EXPORT_API_KEY=' "$WO_DIR/.env" | cut -d= -f2- | tr -d "'\" \r\n"); V_SRC="dibaca dari .env WO (baca-saja)"
+  [ -n "$KEY" ] || fail "EXPORT_API_KEY kosong/tidak ada di $WO_DIR/.env — Export API WO belum diaktifkan (isi lewat Admin WO / .env WO oleh pemilik)"
+elif [ -n "${KEY_FILE:-}" ]; then
   [ -f "$KEY_FILE" ] || fail "KEY_FILE tidak ada"
   [ "$(stat -c%a "$KEY_FILE")" = 600 ] || fail "KEY_FILE harus mode 600 (chmod 600 $KEY_FILE)"
-  KEY=$(head -n1 "$KEY_FILE" | tr -d '\r\n ')
+  KEY=$(head -n1 "$KEY_FILE" | tr -d '\r\n '); V_SRC="berkas KEY_FILE"
 elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
   printf '  Ketik/tempel kunci Export API WO lalu Enter (tidak akan tampil): ' > /dev/tty
-  IFS= read -rs KEY < /dev/tty; echo > /dev/tty; KEY=$(printf '%s' "$KEY" | tr -d '\r\n ')
+  IFS= read -rs KEY < /dev/tty; echo > /dev/tty; KEY=$(printf '%s' "$KEY" | tr -d '\r\n '); V_SRC=diketik
 else fail "tidak ada terminal untuk mengetik kunci (jalankan langsung di SSH, atau pakai KEY_FILE=…)"; fi
 [ -n "$KEY" ] || fail "kunci kosong"
 [ "${#KEY}" -ge 16 ] || fail "kunci terlalu pendek (<16 karakter) — salah tempel?"
