@@ -4,7 +4,7 @@ case "$a" in *api.github.com*) printf 'HTTP/2 200\r\nx-oauth-scopes: repo, read:
 f() { [ -f "$STUB/$1" ]; }
 case "$url" in
   */crm/api/health) cat "$STUB/caddy_health" 2>/dev/null || printf 404 ;;
-  */crm/) cat "$STUB/caddy_crm" 2>/dev/null || printf 404 ;;
+  */crm) cat "$STUB/caddy_crm" 2>/dev/null || printf 308 ;;  # sebelum jalur dipasang: WO membalas redirect slash/404
   */login) cat "$STUB/wo_login" 2>/dev/null || printf 200 ;;
   */api/branding) cat "$STUB/wo_brand" 2>/dev/null || printf 200 ;;
   *) printf 200 ;;

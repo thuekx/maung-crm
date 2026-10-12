@@ -232,9 +232,10 @@ for s in postgres garage; do c=$(cid "$s"); docker inspect -f '{{range $k,$v := 
 [ $nets_ok = 1 ] && ok "(d) crm-web & crm-api di maung_edge; postgres/garage tidak" || fail "(d) keanggotaan jaringan salah"
 [ $ports_ok = 1 ] && ok "(d) tidak ada port CRM terbuka di host" || fail "(d) ada port CRM terbuka di host"
 # (b) via Caddy WO — PENDING bila crm.caddy belum dipasang (urutan go-live: deploy CRM dulu, lalu crm.caddy)
-C_HEALTH_CODE=$(http "$WO_URL/crm/api/health"); C_CRM_CODE=$(http "$WO_URL/crm/")
+C_HEALTH_CODE=$(http "$WO_URL/crm/api/health"); C_CRM_CODE=$(http "$WO_URL/crm")
 if [ "$C_HEALTH_CODE" = 200 ]; then C_HEALTH=PASS; ok "(b) $WO_URL/crm/api/health = 200 (Caddy → crm-api)"; else C_HEALTH="PENDING($C_HEALTH_CODE)"; warn "(b) /crm/api/health via Caddy = $C_HEALTH_CODE → crm.caddy belum dipasang di WO (wajar sebelum langkah itu)"; fi
-case "$C_CRM_CODE" in 200|30?) C_CRM="OK($C_CRM_CODE)"; [ "$C_HEALTH" = PASS ] && ok "(b) $WO_URL/crm/ = $C_CRM_CODE" ;; *) C_CRM="PENDING($C_CRM_CODE)" ;; esac
+# /crm (tanpa slash): 200 hanya bila Caddy meneruskan ke crm-web; sebelum jalur dipasang WO sendiri menjawab 404/308 (redirect slash) → bukan bukti.
+if [ "$C_CRM_CODE" = 200 ]; then C_CRM=PASS; ok "(b) $WO_URL/crm = 200 (Caddy → crm-web; login dilakukan sisi klien ke /login?next=)"; else C_CRM="PENDING($C_CRM_CODE)"; fi
 # (c) WO tidak terganggu
 V_LOGIN_A=$(http "$WO_URL/login"); V_BRAND_A=$(http "$WO_URL/api/branding")
 [ "$V_LOGIN_A" = 200 ] && [ "$V_BRAND_A" = 200 ] && ok "(c) WO tetap: /login=200 /api/branding=200" || { [ "$V_LOGIN_B" = 200 ] && [ "$V_BRAND_B" = 200 ] && fail "(c) WO berubah: /login=$V_LOGIN_A /api/branding=$V_BRAND_A"; warn "(c) WO tidak 200 sebelum maupun sesudah ($V_LOGIN_A/$V_BRAND_A)"; }

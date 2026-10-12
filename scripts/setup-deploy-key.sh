@@ -76,8 +76,9 @@ else
   STATUS=WAITING_KEY; REASON="kunci publik belum ditambahkan di GitHub"; result; exit 2
 fi
 # uji read-only: push --dry-run harus DITOLAK (kunci tanpa hak tulis). Tidak ada yang benar-benar dikirim.
+# (ls-remote sudah berhasil di atas, jadi penolakan push = autentikasi OK tetapi tanpa hak tulis; pesan GitHub: "marked as read only" / "access rights".)
 PUSHOUT=$(GIT_SSH_COMMAND="$GSSH" git -C "$HERE" push --dry-run git@github.com:thuekx/maung-crm.git HEAD:refs/heads/zz-uji-readonly 2>&1); PRC=$?
-if [ "$PRC" != 0 ] && echo "$PUSHOUT" | grep -qiE "read-only|permission|denied|not allowed|403"; then RO=YA; ok "kunci TIDAK punya hak tulis (uji push --dry-run ditolak)"
+if [ "$PRC" != 0 ] && echo "$PUSHOUT" | grep -qiE "read[- ]only|marked as read|access rights|permission|denied|not allowed|403"; then RO=YA; ok "kunci TIDAK punya hak tulis (uji push --dry-run ditolak)"
 elif [ "$PRC" = 0 ]; then RO=TIDAK; warn "kunci tampaknya BOLEH menulis — hapus centang 'Allow write access' pada Deploy key di GitHub"
 else RO=TIDAK_PASTI; warn "uji read-only tidak konklusif: $(echo "$PUSHOUT" | tail -1 | cut -c1-120)"; fi
 [ "$RO" = TIDAK ] && die "deploy key punya hak tulis — hapus centang 'Allow write access' di GitHub (Settings → Deploy keys), lalu ulangi (remote belum diubah)"

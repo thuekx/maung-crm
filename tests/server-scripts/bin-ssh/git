@@ -2,7 +2,7 @@
 a="$*"
 case "$a" in
   *"ls-remote git@github.com"*) [ -f "$STUB/key_added" ] && exit 0 || { echo "git@github.com: Permission denied (publickey)." >&2; exit 128; } ;;
-  *"push --dry-run"*) if [ -f "$STUB/key_write" ]; then exit 0; else echo "ERROR: The key you've provided is read-only." >&2; exit 1; fi ;;
+  *"push --dry-run"*) if [ -f "$STUB/key_write" ]; then exit 0; else printf 'ERROR: The key you are authenticating with has been marked as read only.\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n' >&2; exit 1; fi ;;
   *"fetch -q origin main"*) exit 0 ;;
 esac
 exec /usr/bin/git "$@"
