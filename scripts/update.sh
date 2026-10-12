@@ -81,7 +81,7 @@ result() {
   kv container_lama_dihapus "$LEGACY_REMOVED"; kv port_3100_lama "$PORT3100"; kv rollback "$ROLLED"; kv log "$LOG"
   for w in "${WARNS[@]:-}"; do [ -n "$w" ] && printf '  - %s\n' "$w"; done
   case "$STATUS" in
-    PASS) if [ "$C_HEALTH" = PASS ]; then echo "RESULT : UPDATE CRM PASS / NEXT=UJI_MANUAL_PEMILIK (login WO → /apps → ikon CRM)"; else echo "RESULT : UPDATE CRM PASS / NEXT=PASANG_deploy/crm.caddy_DI_WO + reload Caddy (b masih PENDING)"; fi ;;
+    PASS) if [ "$C_HEALTH" = PASS ]; then echo "RESULT : UPDATE CRM PASS / NEXT=UJI_MANUAL_PEMILIK (login WO → /apps → ikon CRM)"; else echo "RESULT : UPDATE CRM PASS / NEXT=PASANG_JALUR_CRM_DI_WO (b masih PENDING): cd ~/Maung-Wo-Inv && bash scripts/app-route.sh add crm </dev/null"; fi ;;
     *) echo "RESULT : GAGAL — $REASON (rollback: $ROLLED)" ;;
   esac
 }

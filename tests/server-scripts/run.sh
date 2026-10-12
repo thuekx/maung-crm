@@ -54,7 +54,7 @@ chk "b: PENDING(404) (crm.caddy belum dipasang) tetap PASS" "has s1 'b_https_crm
 chk "c: WO login/branding 200 sebelum & sesudah" "has s1 'c_wo_login_sesudah=200' && has s1 'c_wo_api_branding_sesudah=200'"
 chk ".env WO & container WO tak berubah" "has s1 'wo_env_tidak_berubah=YA' && has s1 'wo_container_tidak_berubah=YA'"
 chk "container lama dihapus SETELAH bukti" "has s1 'container_lama_dihapus=ya' && calls s1 'rm -f legacy_api_id'"
-chk "NEXT=PASANG crm.caddy" "has s1 'NEXT=PASANG_deploy/crm.caddy_DI_WO'"
+chk "NEXT=PASANG crm.caddy" "has s1 'NEXT=PASANG_JALUR_CRM_DI_WO' && has s1 'scripts/app-route.sh add crm'"
 chk "IMAGE_TAG di .env = SHA HEAD" "grep -q '^IMAGE_TAG=$HEAD' $S/home-s1/maung-crm/.env"
 chk "kunci usang WEB_PORT/CRM_DOMAIN dihapus; secret lama dipertahankan" "! grep -q WEB_PORT $S/home-s1/maung-crm/.env && grep -q 'pgpass_asli_123' $S/home-s1/maung-crm/.env && grep -q 'skLama_rahasia' $S/home-s1/maung-crm/.env"
 chk "last_ok_tag = HEAD" "[ \"\$(cat $S/home-s1/maung-crm-logs/state/last_ok_tag)\" = $HEAD ]"

@@ -42,3 +42,8 @@ c. `https://maung.liv.net.id/login` dan `/api/branding` tetap 200 (WO tak tergan
 d. `crm-web` & `crm-api` ada di jaringan `maung_edge`; tidak ada port CRM terbuka di host.
 Penerimaan akhir (manual, pemilik): login WO → `/apps` → ikon CRM → CRM terbuka tanpa login ulang; 35 menit aktif tidak keluar sesi.
 Urutan go-live: daftarkan CRM di Admin WO ("Tampil di beranda" MATI) → atur Hak Akses "Aplikasi: CRM" → deploy CRM + `crm.caddy` → baru nyalakan ikon.
+
+## Pembaruan dari sesi WO (2026-10-12)
+- **Pemasangan jalur `/crm`**: pakai `scripts/app-route.sh add crm` di repo WO (aturan: hanya `handle /crm… → reverse_proxy <layanan>:<port>`, upstream bukan layanan WO). `deploy/crm.caddy` sudah diuji lolos aturan itu (dan dua kasus negatif ditolak).
+- **Tombol kembali**: WO mewajibkan aplikasi lain menyediakan tautan ke `/apps` (CRM sudah: "← Beranda Maung"). Label seragam dari `GET /api/launcher` → `home.backLabel` bersifat opsional (belum dikerjakan).
+- **Keputusan pemilik — Garage bersama (SETELAH CRM go-live)**: stack tersendiri `maung-garage`, jaringan eksternal `maung_storage` (bukan `maung_edge`), satu bucket + satu kunci per aplikasi, port S3 tidak dibuka ke host, adopsi volume `maung-crm_garage_meta/data` sebagai volume eksternal (kunci `crm-key` dan bucket `crm-photos` ikut). **Belum dikerjakan; compose/skrip CRM berubah saat tahap itu** (service `garage` keluar dari compose CRM, `S3_ENDPOINT` baru, nama volume di backup `update.sh`).

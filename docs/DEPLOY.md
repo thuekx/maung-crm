@@ -20,7 +20,7 @@ Bukti di RESULT (tanpa token): (a) dari container `crm-api`: `GET {WO_URL}/api/a
 ## C. Urutan go-live (disepakati dengan sesi WO)
 1. Daftarkan CRM di Admin WO → Pengaturan → Aplikasi (ID `crm`, jalur `/crm`; **"Tampil di beranda" MATI**).
 2. Admin WO → Hak Akses → "Aplikasi: CRM": beri divisi/sub-role yang boleh.
-3. Jalankan update (bagian B). Sesi WO memasang `deploy/crm.caddy` di `proxy/apps/crm.caddy` dan memuat ulang Caddy; jalankan update lagi: bukti (b) harus `PASS`.
+3. Jalankan update (bagian B). Lalu pasang jalur dengan skrip WO (validasi aturan + `caddy validate`, backup, reload, rollback otomatis): `cd ~/Maung-Wo-Inv && bash scripts/app-route.sh add crm </dev/null` (sumber bawaan `~/maung-crm/deploy/crm.caddy`; `status` untuk melihat jalur terpasang). Jalankan `update.sh` lagi: bukti (b) harus `PASS`. Prasyarat: Maung WO sudah diperbarui/dideploy ke versi dengan beranda `/apps`, Admin → Aplikasi, dan `scripts/app-route.sh` (perintah update WO diberikan sesi WO).
 4. Penerimaan manual pemilik: login WO → `/apps` → ikon CRM → CRM terbuka tanpa login ulang; 35 menit aktif tidak keluar sesi; kamera/GPS bekerja (HTTPS).
 5. Baru nyalakan "Tampil di beranda".
 
