@@ -338,3 +338,97 @@ test("Lead: tautan otomatis (internet & layanan tambahan), ikut status WO, tahap
   assert.equal(list.length, 1); // cari lewat nomor (format apa pun)
   delete process.env.WO_EXPORT_API_KEY;
 });
+
+test("Katalog & penawaran: hitung total di server, alur status, revisi, kunci setelah diterima, lead ikut, cakupan", async () => {
+  const j = async (r: Response) => ({ s: r.status, d: await r.json().catch(() => ({})) as any });
+  const rq = (tok: string, m: string, path: string, body?: unknown) => call(tok, m, "/crm/api" + path, body).then(j);
+
+  // katalog: hanya reviewer; nama tak boleh sama dengan paket INTERNET WO / duplikat
+  assert.equal((await rq("tNurman", "POST", "/catalog", { name: "Sewa WiFi", kind: "SERVICE", unit: "bulan", price: 100000 })).s, 403);
+  const wifi = (await rq("tMgr", "POST", "/catalog", { name: "Sewa WiFi", kind: "SERVICE", unit: "bulan", price: 100000 })).d.id;
+  const cctv = (await rq("tMgr", "POST", "/catalog", { name: "CCTV Dome 2MP", kind: "PRODUCT", unit: "unit", price: 850000 })).d.id;
+  const pasang = (await rq("tMgr", "POST", "/catalog", { name: "Jasa Instalasi CCTV", kind: "SERVICE", unit: "titik", price: 150000 })).d.id;
+  assert.ok(wifi && cctv && pasang);
+  assert.equal((await rq("tMgr", "POST", "/catalog", { name: "home 20", kind: "SERVICE" })).s, 409); // = paket internet WO
+  assert.equal((await rq("tMgr", "POST", "/catalog", { name: "SEWA wifi", kind: "SERVICE" })).s, 409); // duplikat (tak peka huruf)
+  assert.equal((await rq("tNurman", "GET", "/catalog")).d.length >= 3, true);
+
+  // lead non-internet (+ lead internet ditolak untuk penawaran)
+  const lead = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Toko Maju", phone: "081377770001", interest: "CCTV 4 titik" })).d;
+  const inet = (await rq("tNurman", "POST", "/leads", { kind: "INTERNET", name: "Pak Net", phone: "081377770002" })).d;
+  assert.equal((await rq("tNurman", "POST", "/quotations", { leadId: inet.id })).s, 409);
+
+  // buat penawaran: total dihitung server (klien tak dipercaya), nomor QT-yyy-0001
+  const created = await rq("tNurman", "POST", "/quotations", {
+    leadId: lead.id, taxRate: 11, discount: 50000,
+    lines: [{ catalogId: cctv, qty: 4 }, { catalogId: pasang, qty: 4, unitPrice: 125000 }, { catalogId: wifi, qty: 12 }],
+  });
+  assert.equal(created.s, 201);
+  const q = created.d;
+  assert.match(q.number, /^QT-\d{3}-0001$/);
+  // subtotal = 4*850000 + 4*125000 + 12*100000 = 3.400.000+500.000+1.200.000 = 5.100.000; −50.000; PPN 11% = 555.500; total 5.605.500
+  assert.deepEqual([q.subtotal, q.taxAmount, q.total], [5100000, 555500, 5605500]);
+  assert.equal(q.lines[1].unitPrice, 125000); assert.equal(q.lines[0].name, "CCTV Dome 2MP");
+  assert.equal(q.lead.stage, "QUOTING"); // lead maju otomatis
+  assert.equal((await rq("tNurman", "POST", "/quotations", { leadId: lead.id, discount: 1, lines: [{ catalogId: wifi, qty: 0 }] })).s, 400);
+  assert.equal((await rq("tNurman", "POST", "/quotations", { leadId: lead.id, discount: 9e9, lines: [{ catalogId: wifi, qty: 1 }] })).s, 400); // diskon > subtotal
+
+  // ubah (DRAFT), cakupan, harga katalog berubah tidak mengubah baris lama
+  const upd = await rq("tNurman", "PUT", `/quotations/${q.id}`, { subject: "Paket CCTV 4 titik", picName: "Pak Haji", discount: 0 });
+  assert.equal(upd.d.total, 5661000); // 5.100.000 × 1,11
+  await rq("tMgr", "PATCH", `/catalog/${cctv}`, { price: 900000 });
+  assert.equal((await rq("tNurman", "GET", `/quotations/${q.id}`)).d.lines[0].unitPrice, 850000);
+  assert.equal((await rq("tRasyad", "GET", `/quotations/${q.id}`)).s, 404);
+  assert.equal((await rq("tMgr", "POST", `/quotations/${q.id}/approve`)).s, 409); // belum diajukan
+  assert.equal((await rq("tNurman", "POST", `/quotations/${q.id}/send`)).s, 409); // belum disetujui
+
+  // alur persetujuan
+  assert.equal((await rq("tNurman", "POST", `/quotations/${q.id}/submit`)).d.status, "PENDING_APPROVAL");
+  assert.equal((await rq("tNurman", "PUT", `/quotations/${q.id}`, { subject: "x" })).s, 409); // terkunci selama menunggu
+  assert.equal((await rq("tNurman", "POST", `/quotations/${q.id}/approve`)).s, 403); // staf bukan reviewer
+  assert.equal((await rq("tMgr", "POST", `/quotations/${q.id}/return`)).s, 400); // alasan wajib
+  assert.equal((await rq("tMgr", "POST", `/quotations/${q.id}/return`, { note: "Diskon terlalu besar" })).d.status, "DRAFT");
+  await rq("tNurman", "POST", `/quotations/${q.id}/submit`);
+  const ap = (await rq("tMgr", "POST", `/quotations/${q.id}/approve`)).d;
+  assert.equal(ap.status, "APPROVED"); assert.equal(ap.approvedByName, "Manajer");
+  const sent = (await rq("tNurman", "POST", `/quotations/${q.id}/send`)).d;
+  assert.equal(sent.status, "SENT"); assert.ok(sent.sentAt); assert.equal(sent.lead.stage, "NEGOTIATION");
+
+  // revisi: salinan tersimpan, kembali DRAFT, rev naik; tanpa alasan ditolak
+  assert.equal((await rq("tNurman", "POST", `/quotations/${q.id}/revise`)).s, 400);
+  const rev = (await rq("tNurman", "POST", `/quotations/${q.id}/revise`, { note: "Tambah 2 titik" })).d;
+  assert.equal(rev.rev, 2); assert.equal(rev.status, "DRAFT"); assert.equal(rev.revisions.length, 1); assert.equal(rev.revisions[0].total, 5661000);
+  await rq("tNurman", "PUT", `/quotations/${q.id}`, { lines: [{ catalogId: cctv, qty: 6 }, { catalogId: pasang, qty: 6 }] });
+  await rq("tNurman", "POST", `/quotations/${q.id}/submit`); await rq("tMgr", "POST", `/quotations/${q.id}/approve`); await rq("tNurman", "POST", `/quotations/${q.id}/send`);
+
+  // diterima → terkunci, lead Won
+  const acc = (await rq("tNurman", "POST", `/quotations/${q.id}/accept`)).d;
+  assert.equal(acc.status, "ACCEPTED"); assert.equal(acc.lead.stage, "WON");
+  assert.equal((await rq("tNurman", "POST", `/quotations/${q.id}/revise`, { note: "x" })).s, 409);
+  assert.equal((await rq("tNurman", "POST", `/quotations/${q.id}/cancel`, { note: "x" })).s, 409);
+  assert.equal((await rq("tNurman", "PUT", `/quotations/${q.id}`, { subject: "x" })).s, 409);
+
+  // kedaluwarsa otomatis & batal & ditolak
+  const l2 = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Kantor B", phone: "081377770003" })).d;
+  const q2 = (await rq("tNurman", "POST", "/quotations", { leadId: l2.id, validUntil: "2099-01-01", lines: [{ catalogId: wifi, qty: 1 }] })).d;
+  assert.match(q2.number, /-0002$/);
+  await rq("tNurman", "POST", `/quotations/${q2.id}/submit`); await rq("tMgr", "POST", `/quotations/${q2.id}/approve`); await rq("tNurman", "POST", `/quotations/${q2.id}/send`);
+  await pool.query("UPDATE quotations SET valid_until='2020-01-01' WHERE id=$1", [q2.id]);
+  assert.equal((await rq("tNurman", "GET", `/quotations/${q2.id}`)).d.status, "EXPIRED");
+  assert.equal((await rq("tNurman", "POST", `/quotations/${q2.id}/revise`, { note: "Perpanjang" })).d.status, "DRAFT");
+  assert.equal((await rq("tNurman", "POST", `/quotations/${q2.id}/cancel`)).s, 400); // alasan wajib
+  assert.equal((await rq("tNurman", "POST", `/quotations/${q2.id}/cancel`, { note: "Batal" })).d.status, "CANCELLED");
+  // masa berlaku lewat → tidak boleh dikirim
+  const q3 = (await rq("tNurman", "POST", "/quotations", { leadId: l2.id, validUntil: "2020-01-01", lines: [{ catalogId: wifi, qty: 1 }] })).d;
+  await rq("tNurman", "POST", `/quotations/${q3.id}/submit`); await rq("tMgr", "POST", `/quotations/${q3.id}/approve`);
+  assert.equal((await rq("tNurman", "POST", `/quotations/${q3.id}/send`)).s, 409);
+  // item katalog nonaktif tidak bisa diajukan/ditambah
+  await rq("tMgr", "PATCH", `/catalog/${wifi}`, { active: false });
+  assert.equal((await rq("tNurman", "POST", "/quotations", { leadId: l2.id, lines: [{ catalogId: wifi, qty: 1 }] })).s, 400);
+  assert.ok(!(await rq("tNurman", "GET", "/catalog")).d.some((c: any) => c.id === wifi)); // staf tidak melihat yang nonaktif
+  assert.ok((await rq("tMgr", "GET", "/catalog?all=1")).d.some((c: any) => c.id === wifi));
+  // daftar: reviewer melihat semua, staf lain tidak
+  assert.ok((await rq("tMgr", "GET", "/quotations")).d.length >= 3);
+  assert.equal((await rq("tRasyad", "GET", "/quotations")).d.length, 0);
+  assert.equal((await rq("tMktTanpaAkses", "GET", "/quotations")).s, 403);
+});

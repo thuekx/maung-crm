@@ -1,5 +1,8 @@
 import pg from "pg";
 
+// DATE tetap string "YYYY-MM-DD" (tanpa konversi zona waktu ke Date)
+pg.types.setTypeParser(1082, (v: string) => v);
+
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL ?? "postgresql://postgres@localhost:5432/maung_crm",
 });

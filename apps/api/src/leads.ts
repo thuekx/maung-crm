@@ -276,3 +276,15 @@ leadRoutes.delete("/:id", ah(async (req, res) => {
   await audit(u.id, "lead", id, "DELETE");
   res.json({ ok: true });
 }));
+
+const PIPE = ["NEW", "CONTACTED", "QUALIFIED", "QUOTING", "NEGOTIATION"];
+/** Dipakai modul penawaran: majukan tahap lead non-internet (hanya maju; WON dari tahap terbuka mana pun). */
+export async function advanceLead(db: Q, leadId: number, to: "QUOTING" | "NEGOTIATION" | "WON", note: string, actor: { id: string; name: string } | null) {
+  const l = (await db.query("SELECT id, stage, kind FROM leads WHERE id=$1 AND deleted_at IS NULL", [leadId])).rows[0];
+  if (!l || l.kind !== "NON_INTERNET" || !OPEN.includes(l.stage)) return false;
+  if (to !== "WON" && !(PIPE.indexOf(to) > PIPE.indexOf(l.stage))) return false;
+  await db.query(
+    `UPDATE leads SET stage=$2, updated_at=now(), won_at=CASE WHEN $2='WON' THEN now() ELSE won_at END, closed_at=CASE WHEN $2='WON' THEN now() ELSE closed_at END WHERE id=$1`, [leadId, to]);
+  await event(db, leadId, "STAGE", { from: l.stage, to, note, actor });
+  return true;
+}

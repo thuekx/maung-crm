@@ -17,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider>
           <SessionGuard />
           <Nav />
-          <main className="mx-auto max-w-3xl p-4">{children}</main>
+          <main className="mx-auto max-w-3xl p-4 print:max-w-none print:p-0">{children}</main>
         </ThemeProvider>
       </body>
     </html>

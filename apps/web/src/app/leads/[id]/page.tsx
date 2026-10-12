@@ -1,8 +1,11 @@
 "use client";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useState } from "react";
 import LeadForm from "@/components/LeadForm";
 import { api, fmtDate } from "@/lib/api";
 import { CUST_STATUS, KIND, STAGE, stageTone } from "@/lib/leads";
+import { QSTATUS, qTone, rupiah } from "@/lib/money";
 
 export default function LeadDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -13,12 +16,15 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
   const [asking, setAsking] = useState(false);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [quotes, setQuotes] = useState<any[]>([]);
+  const router = useRouter();
 
   const load = useCallback(async () => {
     try {
       const d = await api(`/leads/${id}`);
       setL(d);
       setCand(d.customerCode ? null : await api(`/leads/${id}/candidates`).catch(() => null));
+      setQuotes(d.kind === "NON_INTERNET" ? await api(`/quotations?leadId=${id}`).catch(() => []) : []);
     } catch (e: any) { setMsg(e.message); }
   }, [id]);
   useEffect(() => { load(); }, [load]);
@@ -105,6 +111,20 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
         </div>
       )}
       {msg && <p className="text-sm text-red-600">{msg}</p>}
+
+      {l.kind === "NON_INTERNET" && (
+        <div className="card space-y-2 text-sm">
+          <b>Penawaran</b>
+          {quotes.length === 0 && <p className="text-slate-500">Belum ada penawaran.</p>}
+          {quotes.map((x) => (
+            <Link key={x.id} href={`/quotations/${x.id}`} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 p-2">
+              <span><b>{x.number}{x.rev > 1 ? ` rev ${x.rev}` : ""}</b> <span className="text-xs text-slate-500">{rupiah(x.total)}</span></span>
+              <span className={`rounded px-2 py-0.5 text-xs ${qTone(x.status)}`}>{QSTATUS[x.status]}</span>
+            </Link>
+          ))}
+          {open && <button className="btn" disabled={busy} onClick={() => run(async () => { const q = await api("/quotations", { method: "POST", json: { leadId: l.id } }); router.push(`/quotations/${q.id}`); })}>+ Buat penawaran</button>}
+        </div>
+      )}
 
       <div className="card space-y-1 text-sm">
         <b>Riwayat</b>

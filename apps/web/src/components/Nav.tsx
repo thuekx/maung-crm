@@ -10,6 +10,8 @@ const TABS = [
   { href: "/", label: "Riwayat" },
   { href: "/new", label: "Report Baru" },
   { href: "/leads", label: "Lead" },
+  { href: "/quotations", label: "Penawaran" },
+  { href: "/catalog", label: "Katalog" },
   { href: "/map", label: "Peta" },
 ];
 const THEMES: { v: ThemeChoice; label: string }[] = [
@@ -41,7 +43,7 @@ export default function Nav() {
 
   const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
   return (
-    <header className="sticky top-0 z-[1000]">
+    <header className="sticky top-0 z-[1000] print:hidden">
       <div className="flex items-center gap-3 border-b-2 border-accent-500 bg-brand-900 px-4 py-2.5 text-white dark:bg-brand-950">
         {/* /apps milik WO (di luar basePath) → pakai <a>, bukan next/link */}
         <a href="/apps" className="text-sm text-white/80 hover:text-white">← {back}</a>
@@ -57,7 +59,7 @@ export default function Nav() {
           <button className="text-sm text-white/80 hover:text-white" onClick={logout}>Keluar</button>
         </div>
       </div>
-      <nav className="flex gap-1 border-b border-slate-200 bg-white px-3 py-1.5 text-sm dark:border-slate-700">
+      <nav className="flex gap-1 overflow-x-auto whitespace-nowrap border-b border-slate-200 bg-white px-3 py-1.5 text-sm dark:border-slate-700">
         {TABS.map((t) => (
           <Link key={t.href} href={t.href} className={active(t.href) ? "menu-item menu-item-active" : "menu-item"}>{t.label}</Link>
         ))}
