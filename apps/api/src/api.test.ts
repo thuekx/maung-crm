@@ -248,9 +248,13 @@ test("cermin WO: tarik penuh berhalaman, paket/area turunan, pencocokan nomor (E
   // siklus berikutnya: C2 hilang & paket baru dari endpoint packages → cermin mengikuti WO (penuh)
   exportData.customers = exportData.customers.filter((c) => c.code !== "C2");
   exportData.packages = [{ name: "Home 20", kind: "INTERNET", speed: "20 Mbps", priceSell: 250000, active: true }, { name: "Sewa WiFi", kind: "SERVICE", unit: "bulan", priceSell: 100000, active: true }];
+  exportData.areas = [{ id: "a1", code: null, name: "Pusat", active: false }, { id: "a2", code: null, name: "Cabang A", active: false }, { id: "a3", code: "BKS", name: "Bekasi", active: true }];
+  exportData.packages.push({ name: "Home 10", description: null, speed: null, priceSell: null, active: true, source: "MANUAL" }); // paket manual lama: speed/harga null
   assert.equal((await runSync()).ok, true);
+  assert.deepEqual((await pool.query("SELECT name, code FROM wo_areas ORDER BY name")).rows, [{ name: "Bekasi", code: "BKS" }]); // area nonaktif/contoh tidak masuk
+  assert.deepEqual((await pool.query("SELECT kind, speed, price_sell FROM wo_packages WHERE name='Home 10'")).rows, [{ kind: "INTERNET", speed: null, price_sell: null }]);
   assert.equal((await pool.query("SELECT 1 FROM wo_customers WHERE code='C2'")).rowCount, 0);
-  assert.deepEqual((await pool.query("SELECT name, kind, origin FROM wo_packages ORDER BY name")).rows, [{ name: "Home 20", kind: "INTERNET", origin: "EXPORT" }, { name: "Sewa WiFi", kind: "SERVICE", origin: "EXPORT" }]);
+  assert.deepEqual((await pool.query("SELECT name, kind, origin FROM wo_packages ORDER BY name")).rows, [{ name: "Home 10", kind: "INTERNET", origin: "EXPORT" }, { name: "Home 20", kind: "INTERNET", origin: "EXPORT" }, { name: "Sewa WiFi", kind: "SERVICE", origin: "EXPORT" }]);
   delete process.env.WO_EXPORT_API_KEY;
 });
 
