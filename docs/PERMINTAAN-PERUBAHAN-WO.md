@@ -15,7 +15,7 @@ Dasar: bacaan hanya-baca atas repo WO commit `e1bafe9` (`radius.ts`, `routes/exp
 3. **Resource baru `packages`**: `id, name, kind, speed, priceSell, unit, active, source, updatedAt` (harga jual dibutuhkan untuk penawaran; kunci export sudah terbatas pada server CRM).
 4. **Resource baru `areas`**: `id, code, name, active` (untuk Area Prospect & filter cakupan).
 5. **`work-orders`**: pastikan filter `?type=NEW_INSTALL|SERVICE_ORDER` dan kolom `status`, `customerCode`, `updatedAt` ada (alasan *Lost*: REJECTED/CANCELLED pada WO Pasang Baru).
-6. Nomor telepon: biarkan apa adanya; CRM yang menormalkan (62…). Bila WO bisa menambah `phoneNorm` (digit saja, awalan 62), lebih baik agar kedua sisi memakai aturan sama.
+6. Nomor telepon: **format internasional E.164** (digit dengan kode negara, tidak hanya 62; negara bawaan ID). CRM menormalkan sendiri (`libphonenumber-js`), jadi WO cukup tetap mengekspor `phone` apa adanya. Bila WO ingin ikut: simpan nomor luar negeri **dengan kode negara** (`+60…`) agar cocok otomatis; nomor luar negeri tanpa kode negara hanya menjadi saran manual di CRM. Opsional: `phoneNorm` (E.164) di Export API supaya kedua sisi memakai aturan yang sama.
 
 ## B. Pintu masuk CRM → WO (baru) — untuk jalur non-internet
 Pola mengikuti `integrations/billing/events` (header `x-api-key`, idempoten, audit, `source` khusus). **Kunci terpisah** dari `EXPORT_API_KEY` (kunci export tidak boleh bisa menulis): env WO `CRM_INTEGRATION_KEY`, diisi pemilik, di `.env` kedua sisi saja, tidak pernah di chat/commit.
@@ -30,7 +30,7 @@ Badan permintaan (usulan):
 {
   "crmId": "uuid", "number": "QT-026-0001", "rev": 2, "status": "QUOTED|WON|LOST",
   "validUntil": "2026-11-30", "sentAt": "…", "decidedAt": "…", "lostReason": "…",
-  "customer": { "name": "…", "phone": "628…", "email": "…", "address": "…", "lat": null, "lng": null, "areaCode": "…", "picName": "…" },
+  "customer": { "code": null /* kode pelanggan WO bila Lead untuk pelanggan existing; null = pelanggan baru */, "name": "…", "phone": "628…", "email": "…", "address": "…", "lat": null, "lng": null, "areaCode": "…", "picName": "…" },
   "marketingName": "…",
   "lines": [ { "catalogCrmId": "uuid", "name": "…", "kind": "SERVICE", "qty": 1, "unit": "paket", "unitPrice": 0, "note": "…" } ],
   "total": 0, "taxNote": "PPN …", "terms": "…"
@@ -53,8 +53,9 @@ Aturan: setelah `WON`, penawaran **terkunci** di CRM; perubahan lingkup = penawa
 ## D. Skema & workflow WO
 1. **`Package`**: tambah `kind` (`INTERNET` bawaan | `SERVICE` | `PRODUCT`), `unit`, `crmId` (unik, nullable); `source` menerima `'CRM'`. **Guard `applyPackages`** (`radius.ts`): lewati/jangan menimpa baris `kind != INTERNET` atau `source = 'CRM'` (sekarang `source !== 'RADIUS'` akan *diubah menjadi RADIUS* bila nama kebetulan sama). Master Paket di UI WO: tampilkan `kind`, baris sumber CRM hanya-baca.
 2. **`Customer`**: `source='CRM'` (kolom sudah string). Konfirmasi bahwa sinkron MSRadius tidak menyentuh `source != 'RADIUS'` (penandaan `missingFromApi` sudah dibatasi `source='RADIUS'` — baik). `packageName`/`address`/`phone` wajib: untuk pelanggan CRM isi `packageName` dengan nama jasa utama dan `address` dari penawaran.
-3. **`WoType` baru `SERVICE_ORDER`** (label "Order Jasa/Produk"), dibuat sistem saat `WON`. Usulan alur minimal (selebihnya diputuskan sesi WO sesuai mesin workflow): `SO_NEW → SO_ASSIGNED → SO_IN_PROGRESS → SO_DONE (BA Digital + trigger invoice) | SO_CANCELLED`. Prefix `WO-SO`. `data` memuat `crmQuotation: { number, rev, lines }`.
-4. **Fitur akses**: tidak ada perubahan (`app.crm` sudah ada). Persetujuan penawaran dilakukan CRM sendiri (reviewer = ADMIN / MKT MANAGER|SUPERVISOR).
+3. **Pelanggan existing (layanan tambahan, mis. sewa WiFi / CCTV):** bila `customer.code` terisi dan ada, status `WON` **menautkan WO `SERVICE_ORDER` ke pelanggan itu tanpa membuat pelanggan baru dan tanpa mengubah `status`/`packageName`/data MSRadius** (`setCustomer` jangan dipanggil untuk tipe ini). Kode tidak ditemukan → 404 (CRM menandai gagal, tidak membuat duplikat). Opsional: tampilkan "Layanan tambahan" (daftar order jasa) di halaman Pelanggan WO.
+4. **`WoType` baru `SERVICE_ORDER`** (label "Order Jasa/Produk"), dibuat sistem saat `WON`. Usulan alur minimal (selebihnya diputuskan sesi WO sesuai mesin workflow): `SO_NEW → SO_ASSIGNED → SO_IN_PROGRESS → SO_DONE (BA Digital + trigger invoice) | SO_CANCELLED`. Prefix `WO-SO`. `data` memuat `crmQuotation: { number, rev, lines }`.
+5. **Fitur akses**: tidak ada perubahan (`app.crm` sudah ada). Persetujuan penawaran dilakukan CRM sendiri (reviewer = ADMIN / MKT MANAGER|SUPERVISOR).
 
 ## E. Kop surat & pengaturan dokumen (periksa/konfirmasi saja)
 CRM mencetak penawaran A4 memakai kop yang sama dengan dokumen WO. Mohon dikonfirmasi tetap seperti sekarang:

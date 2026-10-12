@@ -5,10 +5,19 @@ Keputusan pemilik: satu entitas **Lead** (tanpa objek Opportunity terpisah; bera
 ## 1. Jalur Internet (sumber kebenaran: MSRadius → WO)
 `Lead (CRM) ··· pencocokan ··· MSRadius ⇒ WO sync (Pelanggan Waiting = PROSPECT + Formulir Berlangganan otomatis) ⇒ Pasang Baru ⇒ Online = ACTIVE`
 - CRM **tidak** mendaftarkan pelanggan internet dan tidak menulis ke WO; Lead hanya melacak prospek sebelum/selagi pendaftaran dilakukan di MSRadius.
-- **Kunci pencocokan: nomor HP ternormalisasi** (hanya digit; `0…`→`62…`; `+62…`→`62…`; `8…`→`628…`). Data pembanding: cermin baca-saja `customers` + `subscriptions` dari Export API WO.
+- **Kunci pencocokan: nomor telepon dinormalkan ke format internasional E.164** (hanya digit dengan kode negara, mis. `628123…`, `60123…`, `6581…`), bukan hanya 62. Pustaka `libphonenumber-js` (data resmi per negara), negara bawaan `PHONE_DEFAULT_REGION=ID` (env). Aturan: awalan `+` atau `00` = internasional apa adanya; awalan `0` = nasional negara bawaan (`0812…`→`62812…`); awalan lain dicoba sebagai internasional lalu nasional. Satu fungsi `normalizePhone()` dipakai untuk Lead, kontak, dan cermin WO, jadi nomor luar negeri apa pun yang didaftarkan kelak tetap cocok tanpa ubah kode. Nomor tak valid disimpan apa adanya (hanya digit) dan tetap bisa dicocokkan persis, ditandai `phoneValid=false`. Data pembanding: cermin baca-saja `customers` + `subscriptions` dari Export API WO.
+- Nomor luar negeri yang di WO tersimpan **tanpa kode negara** (mis. `012-3456789` untuk Malaysia) terbaca sebagai nasional Indonesia dan tidak akan cocok otomatis; sistem hanya menampilkannya sebagai **saran** (kecocokan 9 digit terakhir + kemiripan nama) untuk dikonfirmasi manual. Tidak pernah menebak negara.
 - Aturan tautan otomatis (konservatif): tepat **satu** kandidat, pelanggan itu dibuat ≥ 1 hari sebelum Lead dibuat (yaitu pendaftar baru, bukan pelanggan lama), status `PROSPECT|INSTALLING`. Sinyal pendukung (tidak menentukan): `salesName` = nama marketing pemilik Lead, `areaName`, kemiripan nama.
-- Selain itu → **saran** untuk dikonfirmasi manual (HP sama dengan >1 pelanggan, atau pelanggan lama sudah ACTIVE → ditandai "sudah pelanggan", bukan Won).
+- Selain itu → **saran** untuk dikonfirmasi manual (HP sama dengan >1 pelanggan). Bila HP cocok dengan pelanggan lama yang sudah `ACTIVE`, Lead internet ditandai **"sudah pelanggan"** dan CRM menawarkan menjadikannya Lead layanan tambahan (bagian 1b), bukan Won.
 - Setelah tertaut (`customerCode` tersimpan, kunci stabil): Stage mengikuti WO — `PROSPECT`→`REGISTERED`, `INSTALLING`→`INSTALLING`, **`ACTIVE` (radiusStatus ONLINE) → `WON`** (mengisi `activatedAt`), `TERMINATED` sebelum aktif / WO Pasang Baru `REJECTED|CANCELLED` → `LOST` (alasan otomatis). Tutup manual tetap bisa (alasan wajib).
+
+## 1b. Lead untuk pelanggan yang SUDAH ada (layanan tambahan: sewa WiFi, beli/pasang CCTV, dll.)
+Lead mewakili **minat layanan**, bukan orang, sehingga satu pelanggan boleh punya banyak Lead dari waktu ke waktu.
+- Saat membuat Lead, CRM mencari pelanggan existing dengan nomor ternormalisasi / nama (cermin WO). Bila ditemukan, Lead **ditautkan sejak awal** (`customerCode` terisi, tanpa menunggu pencocokan) dan kartu Lead menampilkan ringkasan pelanggan (paket internet, status, area, riwayat Lead/penawaran).
+- Layanan tambahan memakai **jalur Non-Internet** (bagian 2): katalog jasa/produk → Quotation → `ACCEPTED`. Bedanya hanya di WO: karena Lead sudah punya `customerCode`, WO **menautkan Order Jasa ke pelanggan yang ada dan tidak membuat pelanggan baru**; status pelanggan (`ACTIVE`, paket internet, data MSRadius) tidak disentuh.
+- Contoh: **sewa WiFi** = baris katalog `SERVICE` berulang (satuan `bulan`/`unit`); **beli + pasang CCTV** = baris `PRODUCT` (perangkat) + baris `SERVICE` (instalasi) dalam satu penawaran.
+- Di luar lingkup (tetap di MSRadius/WO): ganti/naik paket internet, pindah alamat, tambah titik internet bawaan WO.
+- Satu kontak/nomor milik beberapa pelanggan (mis. perusahaan dengan beberapa cabang): Lead memilih pelanggan manual dari daftar kandidat; tidak pernah otomatis.
 
 ## 2. Jalur Non-Internet (sumber kebenaran: CRM → disinkron ke WO)
 `Lead → Quotation (CRM, kop surat WO) → ACCEPTED → sinkron ke WO (Pelanggan CRM + WO Order Jasa)`
