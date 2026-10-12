@@ -4,6 +4,8 @@ import { ACTIVITY_TYPES, api, fmtDate } from "@/lib/api";
 import { readGps, watermark } from "@/lib/photo";
 import ReportForm from "@/components/ReportForm";
 
+const RSTATUS: Record<string, string> = { DRAFT: "Draft", SUBMITTED: "Submitted", REVIEWED: "Reviewed", REVISION_REQUIRED: "Revision Required", COMPLETED: "Completed" };
+const CKIND: Record<string, string> = { COMMENT: "komentar", REVIEWED: "ditandai Reviewed", REVISION_REQUIRED: "dikembalikan untuk revisi", COMPLETED: "ditandai Completed" };
 const SRC: Record<string, string> = { LIVE: "Live GPS", EXIF: "EXIF", UPLOAD: "Upload", MANUAL: "Manual" };
 
 function Badge({ status, source }: { status: string; source?: string | null }) {
@@ -19,13 +21,15 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
   const [edit, setEdit] = useState(false);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [me, setMe] = useState<any>(null);
+  const [note, setNote] = useState("");
   const [task, setTask] = useState({ title: "", picUserId: "", dueDate: "" });
   const camRef = useRef<HTMLInputElement>(null);
   const galRef = useRef<HTMLInputElement>(null);
   const tapFix = useRef<Awaited<ReturnType<typeof readGps>> | null>(null);
 
   const load = useCallback(() => api(`/reports/${id}`).then(setR).catch((e) => setMsg(e.message)), [id]);
-  useEffect(() => { load(); api("/pics").then(setPics).catch(() => {}); }, [load]);
+  useEffect(() => { load(); api("/pics").then(setPics).catch(() => {}); api("/me").then(setMe).catch(() => {}); }, [load]);
   if (!r) return <p>{msg || "Memuat…"}</p>;
   const locked = r.status !== "DRAFT" && r.status !== "REVISION_REQUIRED";
 
@@ -68,7 +72,7 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
   return (
     <div className="space-y-3">
       <div className="card space-y-1 text-sm">
-        <div className="flex justify-between"><b>{ACTIVITY_TYPES[r.activityType]}{r.area ? ` · ${r.area}` : ""}</b><span>{r.status}</span></div>
+        <div className="flex justify-between"><b>{ACTIVITY_TYPES[r.activityType]}{r.area ? ` · ${r.area}` : ""}</b><span className="text-xs">{RSTATUS[r.status] ?? r.status}</span></div>
         <div className="text-slate-500">{fmtDate(r.activityAt)} · PIC: {r.pics.map((p: any) => p.name).join(", ")}</div>
         {r.counterpart && <div>Counterpart: {r.counterpart}</div>}
         {r.accountName && <div>Account: {r.accountName}</div>}
@@ -136,6 +140,22 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
           onClick={() => run(async () => { await api(`/reports/${id}/tasks`, { method: "POST", json: task }); setTask({ title: "", picUserId: "", dueDate: "" }); })}>
           + Tambah task
         </button>
+      </div>
+
+      <div className="card space-y-2 text-sm">
+        <b>Review &amp; komentar</b>
+        {r.comments.length === 0 && <p className="text-slate-500">Belum ada komentar.</p>}
+        <ul className="space-y-1">{r.comments.map((c: any) => (
+          <li key={c.id} className="text-xs text-slate-600"><span className="text-slate-500">{fmtDate(c.at)}</span> · <b>{c.actorName}</b> · {CKIND[c.kind] ?? c.kind}{c.note ? ` — ${c.note}` : ""}</li>
+        ))}</ul>
+        <textarea className="input" rows={2} placeholder={me?.reviewer ? "Catatan review (wajib untuk revisi)" : "Tulis komentar"} value={note} onChange={(e) => setNote(e.target.value)} />
+        <div className="flex flex-wrap gap-2">
+          <button className="btn-ghost" disabled={busy || !note.trim()} onClick={() => run(async () => { await api(`/reports/${id}/comments`, { method: "POST", json: { note: note.trim() } }); setNote(""); })}>Kirim komentar</button>
+          {me?.reviewer && r.status === "SUBMITTED" && <button className="btn" disabled={busy} onClick={() => run(async () => { await api(`/reports/${id}/review`, { method: "POST", json: { note: note.trim() || undefined } }); setNote(""); })}>Tandai Reviewed</button>}
+          {me?.reviewer && ["SUBMITTED", "REVIEWED"].includes(r.status) && <button className="btn-danger" disabled={busy || !note.trim()} onClick={() => run(async () => { await api(`/reports/${id}/return`, { method: "POST", json: { note: note.trim() } }); setNote(""); })}>Kembalikan (revisi)</button>}
+          {me?.reviewer && r.status === "REVIEWED" && <button className="btn-secondary" disabled={busy} onClick={() => run(async () => { await api(`/reports/${id}/complete`, { method: "POST", json: { note: note.trim() || undefined } }); setNote(""); })}>Selesaikan (Completed)</button>}
+        </div>
+        {me?.reviewer && r.status === "REVIEWED" && r.tasks.some((t: any) => t.status === "OPEN") && <p className="text-xs text-amber-700">Masih ada follow-up terbuka — selesaikan dulu sebelum Completed.</p>}
       </div>
 
       {msg && <p className="text-sm text-red-600">{msg}</p>}

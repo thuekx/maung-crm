@@ -9,6 +9,7 @@ import { storage } from "./storage.js";
 import { lookupByPhone, runSync, syncStatus } from "./woSync.js";
 import { normalizePhone } from "./phone.js";
 import { leadRoutes } from "./leads.js";
+import { dashboardRoutes } from "./dashboard.js";
 import { catalogRoutes } from "./catalog.js";
 import { quotationRoutes } from "./quotations.js";
 import { MAX_BYTES, compress, saveFile, sign, validateImage, verifySig } from "./files.js";
@@ -94,11 +95,12 @@ async function writePics(c: { query: typeof pool.query }, reportId: number, ids:
 }
 
 async function detail(row: any) {
-  const [pics, items, photos, tasks] = await Promise.all([
+  const [pics, items, photos, tasks, comments] = await Promise.all([
     pool.query("SELECT user_id AS \"userId\", name FROM field_report_pics WHERE report_id=$1 ORDER BY name", [row.id]),
     pool.query("SELECT kind, text FROM field_report_items WHERE report_id=$1 ORDER BY position", [row.id]),
     pool.query("SELECT * FROM field_photos WHERE report_id=$1 AND deleted_at IS NULL ORDER BY taken_at", [row.id]),
     pool.query("SELECT id, title, pic_user_id AS \"picUserId\", pic_name AS \"picName\", to_char(due_date,'YYYY-MM-DD') AS \"dueDate\", status FROM field_tasks WHERE report_id=$1 AND deleted_at IS NULL ORDER BY due_date", [row.id]),
+    pool.query("SELECT id, kind, note, actor_name AS \"actorName\", at FROM field_report_comments WHERE report_id=$1 ORDER BY at, id", [row.id]),
   ]);
   const grouped = (k: string) => items.rows.filter((i) => i.kind === k).map((i) => i.text);
   return {
@@ -116,6 +118,7 @@ async function detail(row: any) {
       originalUrl: sign(p.id, "original"), watermarkUrl: p.watermark_path ? sign(p.id, "watermark") : null,
     })),
     tasks: tasks.rows,
+    comments: comments.rows,
   };
 }
 
@@ -159,6 +162,7 @@ export function createApp() {
   }));
 
   r.use("/leads", leadRoutes);
+  r.use("/dashboard", dashboardRoutes);
   r.use("/catalog", catalogRoutes);
   r.use("/quotations", quotationRoutes);
 
@@ -352,6 +356,43 @@ export function createApp() {
     if (!row.summary?.trim()) throw fail(400, "Summary wajib diisi sebelum submit");
     await pool.query("UPDATE field_reports SET status='SUBMITTED', submitted_at=now(), updated_at=now() WHERE id=$1", [id]);
     await audit(u.id, "field_report", id, "SUBMIT", { status: row.status }, { status: "SUBMITTED" });
+    res.json(await detail(await loadReport(id, u)));
+  }));
+
+  // Review manager: komentar (pemilik & reviewer), keputusan Reviewed / Revision Required / Completed (reviewer).
+  const REVIEW = {
+    review: { from: ["SUBMITTED"], to: "REVIEWED", note: false },
+    return: { from: ["SUBMITTED", "REVIEWED"], to: "REVISION_REQUIRED", note: true },
+    complete: { from: ["REVIEWED"], to: "COMPLETED", note: false },
+  } as const;
+  r.post("/reports/:id/comments", ah(async (req, res) => {
+    const u = req.user!, id = idParam(req);
+    const row = await loadReport(id, u);
+    const b = z.object({ note: z.string().trim().min(1, "Komentar kosong").max(1000) }).parse(req.body);
+    await pool.query("INSERT INTO field_report_comments (report_id,kind,note,actor_id,actor_name) VALUES ($1,'COMMENT',$2,$3,$4)", [id, b.note, u.id, u.name]);
+    await audit(u.id, "field_report", id, "COMMENT", null, { status: row.status });
+    res.status(201).json(await detail(await loadReport(id, u)));
+  }));
+  for (const key of Object.keys(REVIEW) as (keyof typeof REVIEW)[]) r.post(`/reports/:id/${key}`, ah(async (req, res) => {
+    const u = req.user!, id = idParam(req);
+    if (!isReviewer(u)) throw fail(403, "Hanya reviewer (Admin / MKT Manager / Supervisor)");
+    const row = await loadReport(id, u);
+    const a = REVIEW[key];
+    if (!(a.from as readonly string[]).includes(row.status)) throw fail(409, `Report berstatus ${row.status}; aksi ini tidak berlaku`);
+    const b = z.object({ note: z.string().trim().max(1000).optional() }).parse(req.body ?? {});
+    if (a.note && !b.note) throw fail(400, "Catatan revisi wajib diisi");
+    if (key === "complete") {
+      const open = (await pool.query("SELECT count(*)::int n FROM field_tasks WHERE report_id=$1 AND status='OPEN' AND deleted_at IS NULL", [id])).rows[0].n;
+      if (open) throw fail(409, `Masih ada ${open} follow-up yang belum selesai — selesaikan dulu sebelum Completed`);
+    }
+    const c = await pool.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("UPDATE field_reports SET status=$2, updated_at=now() WHERE id=$1", [id, a.to]);
+      await c.query("INSERT INTO field_report_comments (report_id,kind,note,actor_id,actor_name) VALUES ($1,$2,$3,$4,$5)", [id, a.to, b.note ?? null, u.id, u.name]);
+      await audit(u.id, "field_report", id, key.toUpperCase(), { status: row.status }, { status: a.to }, c);
+      await c.query("COMMIT");
+    } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
     res.json(await detail(await loadReport(id, u)));
   }));
 

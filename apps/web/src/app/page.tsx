@@ -1,18 +1,21 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 import { ACTIVITY_TYPES, api, fmtDate } from "@/lib/api";
 
 const STATUS: Record<string, string> = { DRAFT: "Draft", SUBMITTED: "Submitted", REVIEWED: "Reviewed", REVISION_REQUIRED: "Revision Required", COMPLETED: "Completed" };
 
-export default function History() {
+function History() {
+  const status = useSearchParams().get("status") ?? "";
   const [rows, setRows] = useState<any[] | null>(null);
   const [tasks, setTasks] = useState<any[]>([]);
   const [err, setErr] = useState("");
   useEffect(() => {
-    api("/reports").then(setRows).catch((e) => setErr(e.message));
+    setRows(null);
+    api(`/reports${status ? `?status=${status}` : ""}`).then(setRows).catch((e) => setErr(e.message));
     api("/tasks").then(setTasks).catch(() => {});
-  }, []);
+  }, [status]);
   if (err) return <p className="text-red-600">{err}</p>;
   if (!rows) return <p>Memuat…</p>;
   const overdue = tasks.filter((t) => t.overdue);
@@ -20,6 +23,11 @@ export default function History() {
     <div className="space-y-3">
       {overdue.length > 0 && <div className="card border-red-300 text-sm text-red-700">{overdue.length} follow-up terlambat</div>}
       <h1 className="text-lg font-semibold">Activity History</h1>
+      <div className="flex flex-wrap gap-2">
+        {[["", "Semua"], ["SUBMITTED", "Perlu review"], ["REVISION_REQUIRED", "Revisi"], ["REVIEWED", "Reviewed"], ["COMPLETED", "Completed"]].map(([k, l]) => (
+          <Link key={k} href={k ? `/?status=${k}` : "/"} className={status === k ? "menu-item menu-item-active" : "menu-item"}>{l}</Link>
+        ))}
+      </div>
       {rows.length === 0 && <p className="text-slate-500">Belum ada report.</p>}
       {rows.map((r) => (
         <Link key={r.id} href={`/reports/${r.id}`} className="card block">
@@ -31,3 +39,5 @@ export default function History() {
     </div>
   );
 }
+
+export default function Page() { return <Suspense fallback={<p>Memuat…</p>}><History /></Suspense>; }

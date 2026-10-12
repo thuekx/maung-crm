@@ -450,3 +450,59 @@ test("Katalog & penawaran: hitung total di server, alur status, revisi, kunci se
   assert.equal((await rq("tRasyad", "GET", "/quotations")).d.length, 0);
   assert.equal((await rq("tMktTanpaAkses", "GET", "/quotations")).s, 403);
 });
+
+test("Review manager: komentar, Reviewed/Revision Required/Completed, aturan follow-up, riwayat", async () => {
+  const j = async (r: Response) => ({ s: r.status, d: await r.json().catch(() => ({})) as any });
+  const rq = (tok: string, m: string, path: string, body?: unknown) => call(tok, m, "/crm/api" + path, body).then(j);
+  const rep = (await rq("tNurman", "POST", "/reports", { activityType: "MEETING", area: "Rev-Area", summary: "Rapat review", picIds: ["u-nurman"] })).d;
+  assert.equal((await rq("tMgr", "POST", `/reports/${rep.id}/review`)).s, 409); // belum disubmit
+  await rq("tNurman", "POST", `/reports/${rep.id}/submit`);
+  assert.equal((await rq("tNurman", "POST", `/reports/${rep.id}/review`)).s, 403); // staf bukan reviewer
+  assert.equal((await rq("tMgr", "POST", `/reports/${rep.id}/return`)).s, 400); // catatan wajib
+  const ret = await rq("tMgr", "POST", `/reports/${rep.id}/return`, { note: "Lengkapi counterpart" });
+  assert.equal(ret.d.status, "REVISION_REQUIRED"); assert.equal(ret.d.comments.at(-1).kind, "REVISION_REQUIRED");
+  assert.equal((await rq("tNurman", "PUT", `/reports/${rep.id}`, { activityType: "MEETING", area: "Rev-Area", counterpart: "Pak RT", summary: "Rapat review" })).s, 200); // bisa diubah lagi
+  assert.equal((await rq("tNurman", "POST", `/reports/${rep.id}/comments`, { note: "Sudah dilengkapi" })).s, 201); // pemilik boleh berkomentar
+  assert.equal((await rq("tRasyad", "POST", `/reports/${rep.id}/comments`, { note: "x" })).s, 403); // bukan miliknya
+  await rq("tNurman", "POST", `/reports/${rep.id}/submit`);
+  assert.equal((await rq("tMgr", "POST", `/reports/${rep.id}/complete`)).s, 409); // harus Reviewed dulu
+  await rq("tNurman", "POST", `/reports/${rep.id}/tasks`, { title: "Kirim proposal", picUserId: "u-nurman", dueDate: "2020-01-01" });
+  assert.equal((await rq("tMgr", "POST", `/reports/${rep.id}/review`, { note: "OK" })).d.status, "REVIEWED");
+  const blocked = await rq("tMgr", "POST", `/reports/${rep.id}/complete`);
+  assert.equal(blocked.s, 409); assert.match(blocked.d.error, /follow-up/);
+  const t = (await rq("tNurman", "GET", "/tasks")).d.find((x: any) => x.reportId == rep.id);
+  assert.equal(t.overdue, true);
+  await rq("tNurman", "PATCH", `/tasks/${t.id}`, { status: "DONE" });
+  const done = await rq("tMgr", "POST", `/reports/${rep.id}/complete`);
+  assert.equal(done.d.status, "COMPLETED");
+  assert.deepEqual(done.d.comments.map((c: any) => c.kind), ["REVISION_REQUIRED", "COMMENT", "REVIEWED", "COMPLETED"]);
+  assert.equal((await rq("tNurman", "PUT", `/reports/${rep.id}`, { activityType: "MEETING" })).s, 409); // selesai = terkunci
+});
+
+test("Dashboard KPI: rentang tanggal, cakupan staf vs reviewer, filter marketing/area, pipeline lead & penawaran", async () => {
+  const rq = (tok: string, path: string) => call(tok, "GET", "/crm/api" + path).then(async (r) => ({ s: r.status, d: await r.json() as any }));
+  const rev = await rq("tMgr", "/dashboard?area=rev-area");
+  assert.equal(rev.s, 200); assert.equal(rev.d.field.visits, 1);
+  assert.deepEqual(rev.d.field.perMarketing.map((x: any) => [x.name, x.visits]), [["Nurman", 1]]);
+  assert.equal(rev.d.field.verified + rev.d.field.unverified, 1); // tanpa GPS = Unverified
+  assert.ok(rev.d.people.length > 0);
+  // staf: hanya miliknya, filter marketing diabaikan
+  const mine = await rq("tRasyad", "/dashboard?marketing=u-nurman");
+  assert.equal(mine.d.scope, "marketing"); assert.equal(mine.d.filters.marketing, "u-rasyad"); assert.deepEqual(mine.d.people, []);
+  const mineVisits = mine.d.field.perMarketing.map((x: any) => x.name);
+  assert.ok(mineVisits.every((n: string) => n === "Rasyad"));
+  // filter marketing oleh reviewer
+  const onlyNurman = await rq("tMgr", "/dashboard?marketing=u-nurman");
+  assert.ok(onlyNurman.d.field.perMarketing.every((x: any) => x.name === "Nurman"));
+  // rentang di masa lalu → nol
+  const old = await rq("tMgr", "/dashboard?from=2020-01-01&to=2020-01-31");
+  assert.equal(old.d.field.visits, 0); assert.equal(old.d.leads.created, 0);
+  assert.equal((await rq("tMgr", "/dashboard?from=2026-02-01&to=2026-01-01")).s, 400);
+  assert.equal((await rq("tMgr", "/dashboard?from=bukan")).s, 400);
+  // pipeline: dari tes sebelumnya ada lead non-internet Won & penawaran diterima
+  const d = (await rq("tMgr", "/dashboard")).d;
+  assert.ok(d.leads.created >= 3); assert.ok(d.leads.won >= 1); assert.equal(typeof d.leads.winRate, "number");
+  assert.ok(d.quotations.acceptedCount >= 1); assert.ok(d.quotations.acceptedValue > 0);
+  assert.equal(d.field.tasks.overdue >= 0, true);
+  assert.equal((await rq("tMktTanpaAkses", "/dashboard")).s, 403);
+});

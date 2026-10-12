@@ -7,6 +7,7 @@ import { useBranding } from "@/lib/brand";
 import { useTheme, type ThemeChoice } from "@/lib/theme";
 
 const TABS = [
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/", label: "Riwayat" },
   { href: "/new", label: "Report Baru" },
   { href: "/leads", label: "Lead" },
