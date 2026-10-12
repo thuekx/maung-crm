@@ -86,7 +86,14 @@ async function applyLink(db: Q, leadId: number, code: string, state: "AUTO" | "M
 async function followCustomer(db: Q, lead: any): Promise<boolean> {
   if (lead.kind !== "INTERNET" || !lead.customer_code || !OPEN.includes(lead.stage)) return false;
   const c = (await db.query("SELECT status, activated_at, wo_created_at FROM wo_customers WHERE code=$1", [lead.customer_code])).rows[0];
-  const next = c ? stageFromCustomer(c.status) : null;
+  let next = c ? stageFromCustomer(c.status) : null;
+  // WO Pasang Baru ditolak/dibatalkan (setelah Lead ada) padahal pelanggan masih Prospect/Instalasi → Lost otomatis.
+  if (c && (c.status === "PROSPECT" || c.status === "INSTALLING")) {
+    const since = new Date(lead.created_at ?? Date.now()).getTime() - 86_400_000;
+    const w = (await db.query("SELECT number, status, wo_updated_at FROM wo_work_orders WHERE customer_code=$1 AND type='NEW_INSTALL' ORDER BY wo_created_at DESC NULLS LAST LIMIT 1", [lead.customer_code])).rows[0];
+    if (w && (w.status === "REJECTED" || w.status === "CANCELLED") && new Date(w.wo_updated_at ?? 0).getTime() >= since)
+      next = { stage: "LOST", lost: `WO Pasang Baru ${w.number} ${w.status === "REJECTED" ? "ditolak (validasi teknis)" : "dibatalkan"}` };
+  }
   if (!next || next.stage === lead.stage) return false;
   // Pelanggan lama yang sudah aktif sebelum Lead ada BUKAN kemenangan Lead ini (tetap terbuka; ubah manual bila perlu).
   if (next.stage === "WON") {

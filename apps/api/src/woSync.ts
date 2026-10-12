@@ -17,12 +17,13 @@ type Row = Record<string, any>;
 
 class MissingResource extends Error {}
 
-async function fetchAll(resource: string): Promise<Row[]> {
+async function fetchAll(resource: string, params: Record<string, string> = {}): Promise<Row[]> {
   const out: Row[] = [];
   let cursor = "";
   for (let i = 0; i < MAX_PAGES; i++) {
     const u = new URL(`${WO_URL()}/api/export/${resource}`);
     u.searchParams.set("limit", String(PAGE));
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
     if (cursor) u.searchParams.set("cursor", cursor);
     const r = await fetch(u, { headers: { "x-api-key": KEY() }, signal: AbortSignal.timeout(60_000) });
     if (r.status === 404) throw new MissingResource(resource);
@@ -91,13 +92,28 @@ async function syncSubscriptions() {
   return rows.length;
 }
 
+/** WO Pasang Baru saja (alasan Lost lead internet: ditolak validasi teknis / dibatalkan). `?type=` disaring juga di sisi CRM (WO lama mengabaikannya). */
+async function syncWorkOrders() {
+  let all: Row[];
+  try { all = await fetchAll("work-orders", { type: "NEW_INSTALL" }); } catch (e) { if (e instanceof MissingResource) return 0; throw e; }
+  const data = all.filter((r) => r.type === "NEW_INSTALL" && s(r.number));
+  const rows = data.map((r) => ({ number: s(r.number), type: "NEW_INSTALL", status: s(r.status), customer_code: s(r.customerCode), wo_created_at: t(r.createdAt), wo_updated_at: t(r.updatedAt) }));
+  const cols = "number,type,status,customer_code,wo_created_at,wo_updated_at";
+  await replaceAll("wo_work_orders", "number", cols, "number text,type text,status text,customer_code text,wo_created_at timestamptz,wo_updated_at timestamptz", rows, upd(cols.split(",").slice(1)));
+  return rows.length;
+}
+
 /** `packages` belum tentu ada di WO (permintaan perubahan WO): bila 404, turunkan dari nama paket yang dipakai pelanggan/langganan. */
 async function syncPackages(): Promise<{ rows: number; mode: string }> {
   try {
     const data = await fetchAll("packages");
-    const rows = data.filter((r) => s(r.name)).map((r) => ({ name: s(r.name), kind: s(r.kind) ?? "INTERNET", speed: s(r.speed), price_sell: num(r.priceSell), unit: s(r.unit), active: r.active !== false, origin: "EXPORT" }));
-    const cols = "name,kind,speed,price_sell,unit,active,origin";
-    await replaceAll("wo_packages", "name", cols, "name text,kind text,speed text,price_sell numeric,unit text,active boolean,origin text", rows, upd(cols.split(",").slice(1)));
+    // WO belum mengekspor kind/unit: paket MANUAL/RADIUS = INTERNET; sumber lain (mis. CRM) = SERVICE sampai WO mengirim `kind`.
+    const rows = data.filter((r) => s(r.name)).map((r) => ({
+      name: s(r.name), kind: s(r.kind) ?? (!s(r.source) || s(r.source) === "MANUAL" || s(r.source) === "RADIUS" ? "INTERNET" : "SERVICE"),
+      speed: s(r.speed), price_sell: num(r.priceSell), unit: s(r.unit), active: r.active !== false, origin: "EXPORT", source: s(r.source), description: s(r.description),
+    }));
+    const cols = "name,kind,speed,price_sell,unit,active,origin,source,description";
+    await replaceAll("wo_packages", "name", cols, "name text,kind text,speed text,price_sell numeric,unit text,active boolean,origin text,source text,description text", rows, upd(cols.split(",").slice(1)));
     return { rows: rows.length, mode: "full" };
   } catch (e) {
     if (!(e instanceof MissingResource)) throw e;
@@ -161,6 +177,7 @@ export async function runSync(): Promise<SyncResult> {
     const steps: [string, () => Promise<{ rows: number; mode: string }>][] = [
       ["customers", async () => ({ rows: await syncCustomers(), mode: "full" })],
       ["subscriptions", async () => ({ rows: await syncSubscriptions(), mode: "full" })],
+      ["work-orders", async () => ({ rows: await syncWorkOrders(), mode: "full" })],
       ["packages", syncPackages],
       ["areas", syncAreas],
     ];

@@ -51,4 +51,4 @@ Tahap 1–3 tidak menunggu WO; hanya tahap 1 (kolom `updatedAt` agar efisien) da
 
 ## 4. Status pengerjaan (CRM)
 - Tahap 1 (cermin WO + normalisasi nomor E.164 + `scripts/set-export-key.sh`): selesai di repo, belum dipasang di server (menunggu pemilik/WO).
-- Tahap 2 (Lead): selesai di repo — API `/crm/api/leads` (buat/ubah/tahap/tautan/kandidat), tautan otomatis sesuai aturan bagian 1/1b, tahap internet mengikuti status pelanggan WO setelah tiap sinkron, UI `/leads`. Belum ada: alasan *Lost* otomatis dari WO Pasang Baru `REJECTED/CANCELLED` (butuh `work-orders` di cermin) dan dashboard.
+- Tahap 2 (Lead): selesai di repo — API `/crm/api/leads` (buat/ubah/tahap/tautan/kandidat), tautan otomatis sesuai aturan bagian 1/1b, tahap internet mengikuti status pelanggan WO setelah tiap sinkron, UI `/leads`. Alasan *Lost* otomatis dari WO Pasang Baru `REJECTED/CANCELLED` sudah ada (memakai `work-orders?type=NEW_INSTALL` dari WO `e4b3d59`). Belum ada: dashboard.

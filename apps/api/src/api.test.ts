@@ -268,6 +268,7 @@ test("Lead: tautan otomatis (internet & layanan tambahan), ikut status WO, tahap
       cust("A5", "Pelanggan CCTV", "+60 12-345 6789", "ACTIVE", old, { activatedAt: old }),
     ],
     subscriptions: [],
+    "work-orders": [],
   };
   assert.equal((await runSync()).ok, true);
   const mk = (tok: string, b: any) => call(tok, "POST", "/crm/api/leads", b);
@@ -292,6 +293,18 @@ test("Lead: tautan otomatis (internet & layanan tambahan), ikut status WO, tahap
   const still = await (await call("tNurman", "GET", `/crm/api/leads/${l1.id}`)).json();
   assert.equal(still.linkState, "MANUAL"); assert.equal(still.stage, "NEW"); // pelanggan lama aktif ≠ kemenangan
   assert.equal((await call("tNurman", "POST", `/crm/api/leads/${l1.id}/stage`, { stage: "WON" })).status, 409); // won internet hanya mengikuti WO
+
+  // 2b) WO Pasang Baru ditolak validasi teknis → lead internet Lost otomatis (alasan dari WO)
+  exportData.customers.push(cust("A6", "Ditolak FOC", "0812-6660-0006", "PROSPECT", recent));
+  await runSync();
+  const rej = await (await mk("tNurman", { kind: "INTERNET", name: "Pak Tolak", phone: "081266600006" })).json();
+  assert.equal(rej.customerCode, "A6"); assert.equal(rej.stage, "REGISTERED");
+  exportData["work-orders"] = [{ number: "WO-NI-1", type: "NEW_INSTALL", status: "REJECTED", customerCode: "A6", createdAt: recent, updatedAt: recent, data: { rahasia: "x" } },
+    { number: "WO-TS-1", type: "TROUBLE", status: "REJECTED", customerCode: "A6", createdAt: recent, updatedAt: recent }];
+  await runSync();
+  const lost = await (await call("tNurman", "GET", `/crm/api/leads/${rej.id}`)).json();
+  assert.equal(lost.stage, "LOST"); assert.equal(lost.lostAuto, true); assert.match(lost.lostReason, /WO-NI-1 ditolak/);
+  assert.equal((await pool.query("SELECT count(*)::int n FROM wo_work_orders")).rows[0].n, 1); // hanya NEW_INSTALL; data JSON WO tidak disalin
 
   // 3) nomor dipakai >1 pelanggan → tidak menebak, kandidat ditampilkan
   const amb = await (await mk("tNurman", { kind: "INTERNET", name: "Anak", phone: "0812 3330 0003" })).json();

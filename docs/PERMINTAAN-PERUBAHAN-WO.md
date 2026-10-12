@@ -1,6 +1,9 @@
 # Permintaan perubahan di sisi WO — Lead, Quotation & katalog (usulan dari sesi CRM)
 
-Status: **USULAN, menunggu persetujuan pemilik** lalu dikerjakan sesi WO (satu repo satu penulis: sesi CRM tidak menyentuh repo WO).
+> **Status (diperbarui):** Bagian **A selesai dan live di VM WO (commit `e4b3d59`)**: `customers`/`subscriptions` `since`=`updatedAt`, `subscriptions`+`address`, resource `packages` (`id,name,description,speed,priceSell,active,source,updatedAt` — belum ada `kind`/`unit`) dan `areas` (`id,code,name,active`), `work-orders?type=`, guard `applyPackages` (paket sumber selain MANUAL/RADIUS tidak ditimpa). CRM sudah memakainya (cermin `wo_packages`/`wo_areas`/`wo_work_orders`; Lost otomatis dari WO Pasang Baru `REJECTED`/`CANCELLED`). **Bagian B + D (pintu masuk CRM→WO, `Package.kind/unit/crmId`, `SERVICE_ORDER`) = Tahap 2 WO, belum dikerjakan.**
+> **Keputusan pemilik untuk Tahap 2 (dari HANDOFF WO):** semua permintaan dipicu dari Marketing (di CRM: penawaran `ACCEPTED` oleh Marketing); **BA (Berita Acara) tetap wajib**; khusus jasa non-internet, di WO ada **pilihan per order**: (a) pakai stok berjalan (mis. WiFi/router dari stok) atau (b) buat PR baru sebagai proyek sesuai isi penawaran; **harga ikut dikirim ke WO** tetapi tidak masuk Export API. Konsekuensi untuk CRM: badan penawaran memuat tiap baris dengan `kind` (SERVICE/PRODUCT), `qty`, `unit`, `unitPrice`, `note` (cukup bagi WO untuk membentuk PR proyek); pilihan stok-vs-PR dibuat di WO, bukan di CRM. Detail alur `SERVICE_ORDER` (penugasan, peran) masih dirancang di sisi WO.
+
+Status awal dokumen ini: **USULAN, menunggu persetujuan pemilik** lalu dikerjakan sesi WO (satu repo satu penulis: sesi CRM tidak menyentuh repo WO).
 Dasar: bacaan hanya-baca atas repo WO commit `e1bafe9` (`radius.ts`, `routes/export.ts`, `routes/integrations.ts`, `workflows.ts`, `schema.prisma`, `settings.ts`). Rencana sisi CRM: `docs/RENCANA-LEAD-QUOTATION.md`.
 
 ## Ringkas
