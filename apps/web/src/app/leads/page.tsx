@@ -1,15 +1,13 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Icon } from "@/components/icons";
+import { Avatar, Badge, Chips, Empty, PageHeader, SearchField, type Tone } from "@/components/ui";
 import { api, fmtDate } from "@/lib/api";
-import { KIND, STAGE, stageTone } from "@/lib/leads";
+import { STAGE } from "@/lib/leads";
 
-const FILTERS: { key: string; label: string; qs: string }[] = [
-  { key: "open", label: "Terbuka", qs: "open=1" },
-  { key: "WON", label: "Won", qs: "stage=WON" },
-  { key: "LOST", label: "Lost", qs: "stage=LOST" },
-  { key: "all", label: "Semua", qs: "" },
-];
+const FILTERS = [{ key: "open", label: "Terbuka", qs: "open=1" }, { key: "WON", label: "Won", qs: "stage=WON" }, { key: "LOST", label: "Lost", qs: "stage=LOST" }, { key: "all", label: "Semua", qs: "" }];
+const stageTone = (s: string): Tone => (s === "WON" ? "green" : s === "LOST" ? "red" : s === "NEW" ? "slate" : "amber");
 
 export default function Leads() {
   const [filter, setFilter] = useState("open");
@@ -27,40 +25,39 @@ export default function Leads() {
     return () => clearTimeout(t);
   }, [filter, kind, q]);
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Lead</h1>
-        <Link href="/leads/new" className="btn">+ Lead Baru</Link>
-      </div>
-      <input className="input" placeholder="Cari nama, minat, atau nomor telepon (format apa pun)" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="flex flex-wrap items-center gap-2">
-        {FILTERS.map((f) => (
-          <button key={f.key} onClick={() => setFilter(f.key)} className={filter === f.key ? "menu-item menu-item-active" : "menu-item"}>{f.label}</button>
-        ))}
-        <select className="input w-auto" aria-label="Jenis" value={kind} onChange={(e) => setKind(e.target.value)}>
-          <option value="">Semua jenis</option>
-          {Object.entries(KIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-      </div>
+    <div className="space-y-4">
+      <PageHeader icon="target" title="Lead" subtitle="Calon pelanggan internet dan layanan tambahan"
+        action={<Link href="/leads/new" className="btn hidden sm:inline-flex"><Icon name="plus" size={16} />Lead Baru</Link>} />
+      <SearchField value={q} onChange={setQ} placeholder="Cari nama, minat, atau nomor telepon (format apa pun)" />
+      <Chips value={filter} onChange={setFilter} options={FILTERS.map((f) => ({ key: f.key, label: f.label }))} />
+      <Chips value={kind} onChange={setKind} options={[{ key: "", label: "Semua jenis" }, { key: "INTERNET", label: "Internet", icon: "wifi" }, { key: "NON_INTERNET", label: "Non-internet", icon: "box" }]} />
       {err && <p className="text-red-600">{err}</p>}
-      {!rows && !err && <p>Memuat…</p>}
-      {rows?.length === 0 && <p className="text-slate-500">Belum ada lead.</p>}
-      {rows?.map((l) => (
-        <Link key={l.id} href={`/leads/${l.id}`} className="card block">
-          <div className="flex items-start justify-between gap-2 text-sm">
-            <b>{l.name}</b>
-            <span className={`rounded px-2 py-0.5 text-xs ${stageTone(l.stage)}`}>{STAGE[l.stage] ?? l.stage}</span>
-          </div>
-          <div className="text-xs text-slate-500">{l.phone} · {l.interest ?? "—"}{l.area ? ` · ${l.area}` : ""}</div>
-          <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500">
-            <span>{l.kind === "INTERNET" ? "Internet" : "Non-internet"}</span>
-            <span>{l.ownerName}</span>
-            <span>{fmtDate(l.updatedAt)}</span>
-            {l.customerCode && <span>🔗 {l.customerCode}{l.linkState === "AUTO" ? " (otomatis)" : ""}</span>}
-            {l.existingCustomer && <span className="text-amber-700">sudah pelanggan</span>}
-          </div>
-        </Link>
-      ))}
+      {!rows && !err && <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-20 animate-pulse rounded-2xl bg-slate-200/60 dark:bg-white/5" />)}</div>}
+      {rows?.length === 0 && <Empty icon="target" title="Belum ada lead" text="Tambahkan calon pelanggan dari kunjungan atau rekomendasi." href="/leads/new" cta="Lead baru" />}
+      <div className="grid gap-3 md:grid-cols-2">
+        {rows?.map((l) => (
+          <Link key={l.id} href={`/leads/${l.id}`} className="list-card rise">
+            <div className="flex items-start gap-3">
+              <Avatar name={l.name} size={40} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <b className="truncate text-sm text-brand-900 dark:text-white">{l.name}</b>
+                  <Badge tone={stageTone(l.stage)} dot>{STAGE[l.stage] ?? l.stage}</Badge>
+                </div>
+                <div className="mt-0.5 flex items-center gap-1 truncate text-xs text-slate-500"><Icon name={l.kind === "INTERNET" ? "wifi" : "box"} size={13} />{l.interest ?? (l.kind === "INTERNET" ? "Internet" : "Non-internet")}{l.area ? ` · ${l.area}` : ""}</div>
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                  <span className="inline-flex items-center gap-1"><Icon name="phone" size={13} />{l.phone}</span>
+                  <span className="inline-flex items-center gap-1"><Icon name="user" size={13} />{l.ownerName}</span>
+                  <span>{fmtDate(l.updatedAt)}</span>
+                  {l.customerCode && <span className="inline-flex items-center gap-1 text-brand-800 dark:text-accent-300"><Icon name="link" size={13} />{l.customerCode}</span>}
+                  {l.existingCustomer && <Badge tone="amber">sudah pelanggan</Badge>}
+                </div>
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+      <Link href="/leads/new" className="fab sm:hidden" aria-label="Lead baru"><Icon name="plus" size={26} /></Link>
     </div>
   );
 }

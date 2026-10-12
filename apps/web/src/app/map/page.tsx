@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
+import { Badge, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 
 // Popup dirakit dari node DOM: data pengguna (area, nama PIC, caption) selalu menjadi teks, tidak pernah HTML.
@@ -18,7 +19,7 @@ export default function MapView() {
       const [L, data] = await Promise.all([import("leaflet"), api("/map")]);
       if (!el.current) return;
       map = L.map(el.current).setView([-6.9, 107.6], 9);
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap", maxZoom: 19 }).addTo(map);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap", maxZoom: 19, referrerPolicy: "strict-origin-when-cross-origin" } as import("leaflet").TileLayerOptions).addTo(map);
       const pts: [number, number][] = [];
       const color = (s: string) => (s === "VERIFIED" ? "#16a34a" : "#d97706");
       for (const r of data.reports) {
@@ -37,10 +38,15 @@ export default function MapView() {
     return () => map?.remove();
   }, []);
   return (
-    <div className="space-y-2">
-      <h1 className="text-lg font-semibold">Map View</h1>
-      <p className="text-xs text-slate-500">{info} · hijau = GPS Verified, oranye = Unverified</p>
-      <div ref={el} className="h-[70vh] w-full rounded-xl" />
+    <div className="space-y-4">
+      <PageHeader icon="map" title="Peta Aktivitas" subtitle={info} />
+      <div className="flex flex-wrap gap-2 text-xs">
+        <span className="chip"><span className="h-2.5 w-2.5 rounded-full bg-green-600" />GPS Verified</span>
+        <span className="chip"><span className="h-2.5 w-2.5 rounded-full bg-amber-600" />Unverified</span>
+        <Badge tone="slate">titik besar = report · titik kecil = foto</Badge>
+      </div>
+      {/* isolate: z-index internal Leaflet tidak menimpa bilah navigasi */}
+      <div className="isolate overflow-hidden rounded-2xl border border-slate-200 shadow-card dark:border-white/10"><div ref={el} className="h-[68vh] w-full md:h-[72vh]" /></div>
     </div>
   );
 }

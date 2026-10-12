@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, fmtDate } from "@/lib/api";
+import { Icon } from "@/components/icons";
+import { Avatar, Badge, Chips, Empty, PageHeader, SearchField } from "@/components/ui";
+import { api } from "@/lib/api";
 import { QSTATUS, qTone, rupiah } from "@/lib/money";
 
 const FILTERS = [{ key: "open", label: "Berjalan", qs: "open=1" }, { key: "ACCEPTED", label: "Diterima", qs: "status=ACCEPTED" }, { key: "all", label: "Semua", qs: "" }];
@@ -20,21 +22,37 @@ export default function Quotations() {
     return () => clearTimeout(t);
   }, [filter, q]);
   return (
-    <div className="space-y-3">
-      <h1 className="text-lg font-semibold">Penawaran</h1>
-      <p className="text-xs text-slate-500">Penawaran dibuat dari halaman Lead non-internet (tombol “Buat penawaran”).</p>
-      <input className="input" placeholder="Cari nomor atau nama pelanggan" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="flex flex-wrap gap-2">{FILTERS.map((f) => <button key={f.key} onClick={() => setFilter(f.key)} className={filter === f.key ? "menu-item menu-item-active" : "menu-item"}>{f.label}</button>)}</div>
+    <div className="space-y-4">
+      <PageHeader icon="file" title="Penawaran" subtitle="Dibuat dari lead non-internet · berkop surat WO"
+        action={<Link href="/catalog" className="btn-ghost"><Icon name="tag" size={16} />Katalog</Link>} />
+      <SearchField value={q} onChange={setQ} placeholder="Cari nomor atau nama pelanggan" />
+      <Chips value={filter} onChange={setFilter} options={FILTERS.map((f) => ({ key: f.key, label: f.label }))} />
       {err && <p className="text-red-600">{err}</p>}
-      {!rows && !err && <p>Memuat…</p>}
-      {rows?.length === 0 && <p className="text-slate-500">Belum ada penawaran.</p>}
-      {rows?.map((x) => (
-        <Link key={x.id} href={`/quotations/${x.id}`} className="card block text-sm">
-          <div className="flex items-start justify-between gap-2"><b>{x.number}{x.rev > 1 ? ` rev ${x.rev}` : ""}</b><span className={`rounded px-2 py-0.5 text-xs ${qTone(x.status)}`}>{QSTATUS[x.status]}</span></div>
-          <div>{x.customerName}{x.subject ? ` — ${x.subject}` : ""}</div>
-          <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500"><span>{rupiah(x.total)}</span><span>{x.ownerName}</span>{x.validUntil && <span>berlaku s.d. {x.validUntil}</span>}<span>{fmtDate(x.updatedAt)}</span></div>
-        </Link>
-      ))}
+      {!rows && !err && <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-20 animate-pulse rounded-2xl bg-slate-200/60 dark:bg-white/5" />)}</div>}
+      {rows?.length === 0 && <Empty icon="file" title="Belum ada penawaran" text="Buka sebuah lead non-internet lalu pilih “Buat penawaran”." href="/leads" cta="Ke daftar lead" />}
+      <div className="grid gap-3 md:grid-cols-2">
+        {rows?.map((x) => (
+          <Link key={x.id} href={`/quotations/${x.id}`} className="list-card rise">
+            <div className="flex items-start gap-3">
+              <Avatar name={x.customerName} size={40} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <b className="truncate text-sm text-brand-900 dark:text-white">{x.number}{x.rev > 1 ? ` · rev ${x.rev}` : ""}</b>
+                  <Badge tone={qTone(x.status)} dot>{QSTATUS[x.status]}</Badge>
+                </div>
+                <div className="mt-0.5 truncate text-xs text-slate-500">{x.customerName}{x.subject ? ` — ${x.subject}` : ""}</div>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-display text-base font-semibold text-brand-900 dark:text-white">{rupiah(x.total)}</span>
+                  <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                    <span className="inline-flex items-center gap-1"><Icon name="user" size={13} />{x.ownerName}</span>
+                    {x.validUntil && <span className="inline-flex items-center gap-1"><Icon name="clock" size={13} />s.d. {x.validUntil}</span>}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }

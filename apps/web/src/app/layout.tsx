@@ -1,5 +1,5 @@
 import "./globals.css";
-import Nav from "@/components/Nav";
+import AppShell from "@/components/AppShell";
 import SessionGuard from "@/components/SessionGuard";
 import { ThemeProvider } from "@/lib/theme";
 
@@ -16,8 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-slate-50 text-slate-800">
         <ThemeProvider>
           <SessionGuard />
-          <Nav />
-          <main className="mx-auto max-w-3xl p-4 print:max-w-none print:p-0">{children}</main>
+          <AppShell>{children}</AppShell>
         </ThemeProvider>
       </body>
     </html>

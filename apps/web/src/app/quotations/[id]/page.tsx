@@ -2,6 +2,8 @@
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import QuoteEditor from "@/components/QuoteEditor";
+import { Icon } from "@/components/icons";
+import { Avatar, Badge, Section } from "@/components/ui";
 import { api, fmtDate } from "@/lib/api";
 import { QSTATUS, qTone, rupiah } from "@/lib/money";
 
@@ -42,33 +44,40 @@ export default function QuotationDetail({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="space-y-3">
-      <div className="card space-y-1 text-sm">
-        <div className="flex items-start justify-between gap-2">
-          <b className="text-base">{q.number}{q.rev > 1 ? ` · rev ${q.rev}` : ""}</b>
-          <span className={`rounded px-2 py-0.5 text-xs ${qTone(s)}`}>{QSTATUS[s]}</span>
+      <Link href="/quotations" className="btn-link"><Icon name="chevronLeft" size={16} />Semua penawaran</Link>
+      <div className="card hero rise space-y-3 !border-0 text-white">
+        <div className="flex items-start gap-3">
+          <Avatar name={q.customerName} size={48} />
+          <div className="min-w-0 flex-1">
+            <h1 className="font-display text-xl font-semibold leading-6">{q.number}{q.rev > 1 ? ` · rev ${q.rev}` : ""}</h1>
+            <div className="text-sm text-white/80">{q.customerName}{q.subject ? ` — ${q.subject}` : ""}</div>
+          </div>
+          <Badge tone={qTone(s)} dot>{QSTATUS[s]}</Badge>
         </div>
-        <div>{q.customerName}{q.subject ? ` — ${q.subject}` : ""}</div>
-        <div className="text-slate-500">Marketing: {q.marketingName} <span className="text-xs">({q.marketingUserId})</span> · dibuat oleh {q.createdByName}{q.validUntil ? ` · berlaku s.d. ${q.validUntil}` : ""}</div>
-        {q.lead && <div className="text-xs"><Link className="btn-link" href={`/leads/${q.lead.id}`}>Lead: {q.lead.name}</Link></div>}
-        {q.decisionNote && <p className="text-slate-600">Catatan keputusan: {q.decisionNote}</p>}
-        {s === "ACCEPTED" && <p className="text-xs text-green-700">Terkunci. Penawaran ini menjadi dasar pekerjaan; perubahan lingkup = penawaran baru.</p>}
-        <div className="pt-1"><Link className="btn-secondary" href={`/quotations/${q.id}/print`}>🖨 Cetak / PDF (kop surat)</Link></div>
+        <div className="flex items-end justify-between gap-3">
+          <div className="font-display text-3xl font-semibold">{rupiah(q.total)}</div>
+          <Link className="btn" href={`/quotations/${q.id}/print`}><Icon name="print" size={16} />Cetak / PDF</Link>
+        </div>
+        <div className="space-y-0.5 text-xs text-white/70">
+          <div>Marketing: {q.marketingName} ({q.marketingUserId}) · dibuat oleh {q.createdByName}{q.validUntil ? ` · berlaku s.d. ${q.validUntil}` : ""}</div>
+          {q.lead && <Link className="inline-flex items-center gap-1 text-white underline" href={`/leads/${q.lead.id}`}><Icon name="target" size={12} />Lead: {q.lead.name}</Link>}
+        </div>
+        {q.decisionNote && <p className="rounded-xl bg-white/10 p-2.5 text-sm">Catatan keputusan: {q.decisionNote}</p>}
+        {s === "ACCEPTED" && <p className="rounded-xl bg-green-500/20 p-2.5 text-xs text-green-100">Terkunci. Penawaran ini menjadi dasar pekerjaan; perubahan lingkup = penawaran baru.</p>}
       </div>
 
       {q.wo && (
-        <div className="card space-y-1 text-sm">
-          <b>Sinkron ke WO</b>
+        <Section icon="sync" title="Sinkron ke WO">
           {q.wo.syncedAt ? (
             <p className="text-slate-600">Tersinkron: {q.wo.syncedStatus} (rev {q.wo.syncedRev}) · {fmtDate(q.wo.syncedAt)}{q.wo.woNumber ? ` · WO ${q.wo.woNumber}` : ""}</p>
           ) : <p className="text-slate-500">{["SENT", "ACCEPTED", "REJECTED", "EXPIRED"].includes(s) ? "Menunggu dikirim ke WO." : "Belum dikirim ke WO (dikirim saat status Terkirim)."}</p>}
           {q.wo.warnings?.error && <p className="text-red-600">Ditolak WO: {q.wo.warnings.error}</p>}
           {q.wo.warnings?.marketingMatched === false && <p className="text-xs text-amber-700">Marketing {q.marketingName} tidak dikenali sebagai pengguna MKT aktif di WO — nama &amp; id tetap tersimpan apa adanya.</p>}
-        </div>
+        </Section>
       )}
 
       {s === "DRAFT" ? <QuoteEditor key={q.updatedAt} q={q} catalog={catalog} onSaved={load} /> : (
-        <div className="card space-y-2 text-sm">
-          <b>Rincian</b>
+        <Section icon="list" title="Rincian">
           {q.lines.map((l: any) => (
             <div key={l.id} className="flex justify-between gap-2 border-b border-slate-100 pb-1">
               <span>{l.name} <span className="text-xs text-slate-500">× {l.qty} {l.unit} @ {rupiah(l.unitPrice)}</span>{l.note && <span className="block text-xs text-slate-500">{l.note}</span>}</span>
@@ -80,7 +89,7 @@ export default function QuotationDetail({ params }: { params: Promise<{ id: stri
           <div className="flex justify-between"><span>PPN {q.taxRate}%</span><span>{rupiah(q.taxAmount)}</span></div>
           <div className="flex justify-between font-semibold"><span>Total</span><span>{rupiah(q.total)}</span></div>
           {q.approvedByName && <p className="text-xs text-slate-500">Disetujui oleh {q.approvedByName}{q.approvedAt ? `, ${fmtDate(q.approvedAt)}` : ""}</p>}
-        </div>
+        </Section>
       )}
 
       {acts.length > 0 && (

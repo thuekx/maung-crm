@@ -1,5 +1,8 @@
 "use client";
 import { use, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { Icon } from "@/components/icons";
+import { Avatar, Badge as UiBadge, IconChip, type Tone } from "@/components/ui";
 import { ACTIVITY_TYPES, api, fmtDate } from "@/lib/api";
 import { readGps, watermark } from "@/lib/photo";
 import ReportForm from "@/components/ReportForm";
@@ -71,9 +74,16 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
 
   return (
     <div className="space-y-3">
-      <div className="card space-y-1 text-sm">
-        <div className="flex justify-between"><b>{ACTIVITY_TYPES[r.activityType]}{r.area ? ` · ${r.area}` : ""}</b><span className="text-xs">{RSTATUS[r.status] ?? r.status}</span></div>
-        <div className="text-slate-500">{fmtDate(r.activityAt)} · PIC: {r.pics.map((p: any) => p.name).join(", ")} · dibuat oleh {r.createdByName}</div>
+      <Link href="/" className="btn-link"><Icon name="chevronLeft" size={16} />Semua aktivitas</Link>
+      <div className="card rise space-y-2 text-sm">
+        <div className="flex items-start gap-3">
+          <Avatar name={r.pics[0]?.name ?? "?"} size={44} />
+          <div className="min-w-0 flex-1">
+            <h1 className="font-display text-xl font-semibold leading-6 text-brand-900 dark:text-white">{ACTIVITY_TYPES[r.activityType]}{r.area ? ` · ${r.area}` : ""}</h1>
+            <div className="mt-0.5 text-xs text-slate-500">{fmtDate(r.activityAt)} · PIC: {r.pics.map((p: any) => p.name).join(", ")} · dibuat oleh {r.createdByName}</div>
+          </div>
+          <UiBadge tone={({ DRAFT: "slate", SUBMITTED: "amber", REVIEWED: "blue", REVISION_REQUIRED: "red", COMPLETED: "green" } as Record<string, Tone>)[r.status] ?? "slate"} dot>{RSTATUS[r.status] ?? r.status}</UiBadge>
+        </div>
         {r.counterpart && <div>Counterpart: {r.counterpart}</div>}
         {r.accountName && <div>Account: {r.accountName}</div>}
         {r.summary && <p className="whitespace-pre-wrap">{r.summary}</p>}
@@ -85,7 +95,7 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
       </div>
 
       <div className="card space-y-2 text-sm">
-        <b>GPS Check-in</b>
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-brand-900 dark:text-white"><IconChip name="pin" tone="slate" size={16} />GPS Check-in</h2>
         {r.checkin ? (
           <div className="space-y-1">
             <Badge status={r.checkin.locationStatus} source={r.checkin.source} />
@@ -96,7 +106,7 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
       </div>
 
       <div className="card space-y-2">
-        <b className="text-sm">Dokumentasi</b>
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-brand-900 dark:text-white"><IconChip name="camera" tone="slate" size={16} />Dokumentasi</h2>
         {!locked && (
           <div className="flex flex-wrap gap-2">
             <button className="btn" disabled={busy} onClick={openCamera}>📷 Foto (kamera)</button>
@@ -122,7 +132,7 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
       </div>
 
       <div className="card space-y-2 text-sm">
-        <b>Follow-up Task</b>
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-brand-900 dark:text-white"><IconChip name="check" tone="slate" size={16} />Follow-up Task</h2>
         {r.tasks.map((t: any) => (
           <label key={t.id} className="flex items-center gap-2">
             <input type="checkbox" checked={t.status === "DONE"} onChange={(e) => run(() => api(`/tasks/${t.id}`, { method: "PATCH", json: { status: e.target.checked ? "DONE" : "OPEN" } }))} />
@@ -143,7 +153,7 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
       </div>
 
       <div className="card space-y-2 text-sm">
-        <b>Review &amp; komentar</b>
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-brand-900 dark:text-white"><IconChip name="chat" tone="slate" size={16} />Review &amp; komentar</h2>
         {r.comments.length === 0 && <p className="text-slate-500">Belum ada komentar.</p>}
         <ul className="space-y-1">{r.comments.map((c: any) => (
           <li key={c.id} className="text-xs text-slate-600"><span className="text-slate-500">{fmtDate(c.at)}</span> · <b>{c.actorName}</b> · {CKIND[c.kind] ?? c.kind}{c.note ? ` — ${c.note}` : ""}</li>

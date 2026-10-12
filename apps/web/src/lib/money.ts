@@ -12,5 +12,5 @@ export function calc(lines: { qty: number; unitPrice: number }[], discount: numb
 export const QSTATUS: Record<string, string> = {
   DRAFT: "Draft", PENDING_APPROVAL: "Menunggu persetujuan", APPROVED: "Disetujui", SENT: "Terkirim", ACCEPTED: "Diterima pelanggan", REJECTED: "Ditolak pelanggan", EXPIRED: "Kedaluwarsa", CANCELLED: "Dibatalkan",
 };
-export const qTone = (s: string) =>
-  s === "ACCEPTED" ? "bg-green-100 text-green-700" : ["REJECTED", "CANCELLED", "EXPIRED"].includes(s) ? "bg-red-100 text-red-700" : s === "DRAFT" ? "bg-slate-100 text-slate-600" : "bg-amber-100 text-amber-700";
+export const qTone = (s: string): "slate" | "amber" | "green" | "red" =>
+  s === "ACCEPTED" ? "green" : ["REJECTED", "CANCELLED", "EXPIRED"].includes(s) ? "red" : s === "DRAFT" ? "slate" : "amber";

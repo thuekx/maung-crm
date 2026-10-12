@@ -64,3 +64,34 @@ body { @apply bg-slate-50 text-slate-800 antialiased; }
 .dark .border-red-300 { border-color: rgb(239 68 68 / .5); }
 .dark .text-accent-700, .dark .text-accent-600 { color: #fbbf24; }
 .dark dd, .dark td, .dark th, .dark li, .dark label { color: inherit; }
+
+/* ── Desain CRM (tahap tampilan 3): komponen bersama ── */
+@layer components {
+  .badge { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-5; }
+  .badge-slate { @apply bg-slate-100 text-slate-600; }
+  .badge-amber { @apply bg-amber-100 text-amber-700; }
+  .badge-green { @apply bg-green-100 text-green-700; }
+  .badge-red { @apply bg-red-100 text-red-700; }
+  .badge-blue { @apply bg-brand-100 text-brand-800; }
+  .chip { @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-accent-300 hover:text-brand-900; }
+  .chip-active { @apply border-accent-400 bg-accent-50 text-brand-900 shadow-sm; }
+  .tile-ico { @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl; }
+  .list-card { @apply block rounded-2xl border border-slate-200 bg-white p-3.5 shadow-card transition active:scale-[.99] hover:border-accent-300 hover:shadow-md; }
+  .hero { background-image: linear-gradient(135deg, rgb(var(--brand-900)) 0%, rgb(var(--brand-700)) 100%); }
+  .fab { @apply fixed bottom-20 right-4 z-[900] flex h-14 w-14 items-center justify-center rounded-full bg-accent-500 text-brand-900 shadow-lg shadow-black/20 transition active:scale-95 hover:bg-accent-400 md:bottom-8 md:right-8; }
+}
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise .28s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .rise { animation: none; } }
+
+.dark .badge-slate { background-color: rgb(255 255 255 / .08); color: #c3cfe0; }
+.dark .badge-amber { background-color: rgb(245 158 11 / .16); color: #fbbf24; }
+.dark .badge-green { background-color: rgb(34 197 94 / .16); color: #4ade80; }
+.dark .badge-red { background-color: rgb(239 68 68 / .16); color: #f87171; }
+.dark .badge-blue { background-color: rgb(157 184 230 / .16); color: #b9ccec; }
+.dark .chip { background-color: #0e2340; border-color: rgb(255 255 255 / .1); color: #c3cfe0; }
+.dark .chip-active { background-color: rgb(245 158 11 / .14); border-color: rgb(245 158 11 / .5); color: #fff; }
+.dark .list-card { background-color: #0e2340; border-color: rgb(255 255 255 / .08); }
+.dark .list-card:hover { border-color: rgb(245 158 11 / .45); }
+.dark .border-slate-200 { border-color: rgb(255 255 255 / .1); }
+.dark .bg-slate-50 { background-color: #0b1c35; }
