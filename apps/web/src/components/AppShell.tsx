@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
 import { logout, token } from "@/lib/session";
 import { useBranding } from "@/lib/brand";
 import { useTheme, type ThemeChoice } from "@/lib/theme";
@@ -18,6 +19,10 @@ const ITEMS: Item[] = [
   { href: "/catalog", label: "Katalog", icon: "tag" },
   { href: "/map", label: "Peta", icon: "map", mobile: true },
 ];
+const ADMIN_ITEMS: Item[] = [
+  { href: "/admin/settings", label: "Pengaturan CRM", icon: "settings" },
+  { href: "/admin/data", label: "Data & Backup", icon: "layers" },
+];
 const THEME_NEXT: Record<ThemeChoice, ThemeChoice> = { light: "system", system: "dark", dark: "light" };
 const THEME_ICON: Record<ThemeChoice, IconName> = { light: "sun", system: "monitor", dark: "moon" };
 const THEME_LABEL: Record<ThemeChoice, string> = { light: "Tema: terang", system: "Tema: ikuti sistem", dark: "Tema: gelap" };
@@ -29,11 +34,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [back, setBack] = useState("Menu Utama");
   const [name, setName] = useState("");
   const [logoOk, setLogoOk] = useState(true);
+  const [admin, setAdmin] = useState(false); // menu Admin hanya untuk Admin ASLI (bukan peran lain / "bertindak sebagai")
 
   useEffect(() => {
     const t = token();
     if (!t) return;
     const h = { authorization: `Bearer ${t}` };
+    api("/me").then((m: any) => setAdmin(m?.role === "ADMIN" && !m?.acting)).catch(() => setAdmin(false));
     fetch("/api/launcher", { headers: h }).then((r) => (r.ok ? r.json() : null))
       .then((d) => { const l = d?.home?.backLabel; if (typeof l === "string" && l.trim()) setBack(l.trim().slice(0, 40)); }).catch(() => {});
     fetch("/api/auth/me", { headers: h }).then((r) => (r.ok ? r.json() : null))
@@ -63,6 +70,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <Icon name={i.icon} size={19} className={active(i.href) ? "text-accent-400" : ""} />{i.label}
             </Link>
           ))}
+          {admin && (
+            <>
+              <div className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-white/40">Admin</div>
+              {ADMIN_ITEMS.map((i) => (
+                <Link key={i.href} href={i.href} className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${active(i.href) ? "bg-white/10 text-white" : "text-white/70 hover:bg-white/5 hover:text-white"}`}>
+                  {active(i.href) && <span className="absolute inset-y-2 left-0 w-1 rounded-r bg-accent-500" />}
+                  <Icon name={i.icon} size={19} className={active(i.href) ? "text-accent-400" : ""} />{i.label}
+                </Link>
+              ))}
+            </>
+          )}
         </nav>
         <div className="space-y-2 border-t border-white/10 p-3">
           <a href="/apps" className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white"><Icon name="chevronLeft" size={16} />{back}</a>

@@ -50,8 +50,11 @@ services:
       CRM_INTEGRATION_KEY: ${CRM_INTEGRATION_KEY:-}
       WO_SYNC_ENABLED: ${WO_SYNC_ENABLED:-1}
       PHONE_DEFAULT_REGION: ${PHONE_DEFAULT_REGION:-ID}
+      BACKUP_DIR: /backups
     depends_on:
       postgres: { condition: service_healthy }
+    # Backup data CRM (Admin → Data & Backup): volume terpisah dari pgdata. Unduh salinannya ke luar server secara berkala.
+    volumes: [crm_backups:/backups]
     networks: [default, edge, storage]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/crm/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
@@ -84,3 +87,4 @@ networks:
 
 volumes:
   pgdata:
+  crm_backups:

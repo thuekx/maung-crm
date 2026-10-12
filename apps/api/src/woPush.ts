@@ -2,6 +2,7 @@ import { pool } from "./db.js";
 import { WO_URL } from "./auth.js";
 import { detail } from "./quotations.js";
 import { quotationWoPayload, WO_STATUS } from "./woPayload.js";
+import { getSetting } from "./settings.js";
 
 /**
  * Antrean kirim CRM → WO (kontrak: docs/API.md WO, "Integrasi CRM → WO").
@@ -19,6 +20,9 @@ type Q = { query: typeof pool.query };
 /** Tandai entitas perlu dikirim (idempoten: satu baris PENDING per entitas). */
 export async function enqueue(kind: "CATALOG" | "QUOTATION", refId: number | string, db: Q = pool) {
   const crmId = kind === "CATALOG" ? catalogCrmId(refId) : quotationCrmId(refId);
+  // Baris demo (is_demo) TIDAK PERNAH diantre ke WO.
+  const demo = await db.query(kind === "CATALOG" ? "SELECT is_demo FROM catalog_items WHERE id=$1" : "SELECT is_demo FROM quotations WHERE id=$1", [refId]);
+  if (demo.rows[0]?.is_demo) return;
   await db.query(
     `INSERT INTO wo_outbox (kind, ref_id, crm_id) VALUES ($1,$2,$3)
      ON CONFLICT (kind, ref_id) WHERE status='PENDING' DO UPDATE SET next_attempt_at=now(), updated_at=now()`,
@@ -27,9 +31,9 @@ export async function enqueue(kind: "CATALOG" | "QUOTATION", refId: number | str
 
 /** Bawa yang belum pernah tersinkron (mis. data lama sebelum integrasi aktif) ke antrean. */
 export async function enqueueBackfill(): Promise<number> {
-  const c = await pool.query(`SELECT id FROM catalog_items WHERE wo_synced_at IS NULL AND NOT EXISTS (SELECT 1 FROM wo_outbox o WHERE o.kind='CATALOG' AND o.ref_id=catalog_items.id AND o.status IN ('PENDING','BLOCKED'))`);
+  const c = await pool.query(`SELECT id FROM catalog_items WHERE NOT is_demo AND wo_synced_at IS NULL AND NOT EXISTS (SELECT 1 FROM wo_outbox o WHERE o.kind='CATALOG' AND o.ref_id=catalog_items.id AND o.status IN ('PENDING','BLOCKED'))`);
   const q = await pool.query(
-    `SELECT id FROM quotations WHERE deleted_at IS NULL AND status IN ('SENT','ACCEPTED','REJECTED','EXPIRED')
+    `SELECT id FROM quotations WHERE deleted_at IS NULL AND NOT is_demo AND status IN ('SENT','ACCEPTED','REJECTED','EXPIRED')
        AND (wo_synced_rev IS DISTINCT FROM rev OR wo_synced_status IS DISTINCT FROM CASE status WHEN 'SENT' THEN 'QUOTED' WHEN 'ACCEPTED' THEN 'WON' ELSE 'LOST' END
             OR (status='ACCEPTED' AND wo_number IS NULL))
        AND NOT EXISTS (SELECT 1 FROM wo_outbox o WHERE o.kind='QUOTATION' AND o.ref_id=quotations.id AND o.status IN ('PENDING','BLOCKED'))`);
@@ -56,7 +60,7 @@ async function put(path: string, body: unknown): Promise<{ http: number; data: a
 
 async function catalogPayload(id: number) {
   const c = (await pool.query("SELECT * FROM catalog_items WHERE id=$1", [id])).rows[0];
-  if (!c) return null;
+  if (!c || c.is_demo) return null; // demo tidak dikirim
   return { name: c.name, kind: c.kind, unit: c.unit, priceSell: Number(c.price), active: c.active, description: c.description ?? undefined, sku: c.sku ?? undefined };
 }
 
@@ -75,7 +79,7 @@ async function pushCatalog(id: number) {
 
 async function pushQuotation(id: number) {
   const row = (await pool.query("SELECT * FROM quotations WHERE id=$1 AND deleted_at IS NULL", [id])).rows[0];
-  if (!row) return { skipped: true };
+  if (!row || row.is_demo) return { skipped: true, demo: !!row?.is_demo }; // demo tidak pernah dikirim ke WO
   const q = await detail(row);
   // LOST hanya bermakna bila WO pernah menerima penawaran ini.
   if (WO_STATUS[q.status] === "LOST" && !row.wo_synced_at) return { skipped: true };
@@ -106,11 +110,17 @@ let running = false;
 /** Proses satu siklus: semua baris PENDING yang jatuh tempo, berurutan (id naik). */
 export async function processOutbox(): Promise<{ done: number; blocked: number; retry: number }> {
   const out = { done: 0, blocked: 0, retry: 0 };
-  if (!pushEnabled() || running) return out;
+  if (!pushEnabled() || running || (await getSetting("woSync")).paused) return out; // sakelar Pengaturan CRM → "Jeda kirim ke WO"
   running = true;
   try {
     // Katalog lebih dulu agar penawaran yang merujuknya tidak menunggu putaran berikutnya.
     const due = await pool.query(`SELECT * FROM wo_outbox WHERE status='PENDING' AND next_attempt_at <= now() ORDER BY (kind='QUOTATION'), id LIMIT 100`);
+    // pengaman ganda: baris outbox milik data demo (mis. dibuat sebelum penanda) ditutup tanpa menghubungi WO
+    for (const j of due.rows) {
+      const d = await pool.query(j.kind === "CATALOG" ? "SELECT is_demo FROM catalog_items WHERE id=$1" : "SELECT is_demo FROM quotations WHERE id=$1", [j.ref_id]);
+      if (d.rows[0]?.is_demo) { await pool.query(`UPDATE wo_outbox SET status='DONE', response='{"skipped":"demo"}', done_at=now(), updated_at=now() WHERE id=$1`, [j.id]); j.skip = true; }
+    }
+    due.rows = due.rows.filter((j: any) => !j.skip);
     for (const job of due.rows) {
       try {
         const r = job.kind === "CATALOG" ? await pushCatalog(Number(job.ref_id)) : await pushQuotation(Number(job.ref_id));
@@ -141,7 +151,7 @@ export async function outboxStatus() {
   const problems = (await pool.query(
     `SELECT id, kind, ref_id AS "refId", crm_id AS "crmId", status, attempts, last_http AS "lastHttp", last_error AS "lastError", next_attempt_at AS "nextAttemptAt", updated_at AS "updatedAt"
      FROM wo_outbox WHERE status IN ('PENDING','BLOCKED') AND (status='BLOCKED' OR attempts > 0) ORDER BY id DESC LIMIT 50`)).rows;
-  return { enabled: pushEnabled(), keySet: KEY().length > 0, pending: get("PENDING"), blocked: get("BLOCKED"), problems };
+  return { enabled: pushEnabled() && !(await getSetting("woSync")).paused, keySet: KEY().length > 0, paused: (await getSetting("woSync")).paused, pending: get("PENDING"), blocked: get("BLOCKED"), problems };
 }
 
 /** Coba lagi yang BLOCKED (setelah data diperbaiki) — membuat baris PENDING baru. */

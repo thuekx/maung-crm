@@ -8,6 +8,8 @@ export const CRM_FEATURE = "app.crm";
 
 export interface Principal {
   id: string; name: string; email?: string; role: string; subRole?: string; features: string[];
+  /** Admin WO yang sedang "bertindak sebagai" peran lain (menu Data & Backup ditolak selama itu). */
+  acting?: boolean;
 }
 
 declare global {
@@ -26,11 +28,12 @@ async function whoAmI(token: string): Promise<Principal | null> {
   const r = await fetch(`${WO_URL()}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
   if (r.status === 401) return null;
   if (!r.ok) throw new Error(`WO /auth/me ${r.status}`);
-  const d = (await r.json()) as { id?: string; name?: string; email?: string; role?: string; subRole?: string; features?: unknown };
+  const d = (await r.json()) as { id?: string; name?: string; email?: string; role?: string; subRole?: string; features?: unknown; acting?: unknown };
   if (!d.id || !d.role) return null;
   const user: Principal = {
     id: String(d.id), name: d.name ?? String(d.id), email: d.email, role: d.role, subRole: d.subRole,
     features: Array.isArray(d.features) ? d.features.filter((f): f is string => typeof f === "string") : [],
+    acting: !!d.acting,
   };
   if (cache.size > 500) for (const [k, v] of cache) if (v.exp <= Date.now()) cache.delete(k);
   cache.set(token, { exp: Date.now() + TTL_MS, user });
@@ -63,6 +66,14 @@ export const isReviewer = (u: Principal) =>
 
 export function requireCrm(req: Request, res: Response, next: NextFunction) {
   if (!req.user || !canUseCrm(req.user)) return void res.status(403).json({ error: "Akses CRM belum diberikan. Hubungi Admin Maung WO (Hak Akses → Aplikasi: CRM)." });
+  next();
+}
+
+/** Menu Admin CRM (Pengaturan, Data & Backup): hanya Admin ASLI WO — bukan peran lain, bukan Admin yang sedang "bertindak sebagai". */
+export function requireRealAdmin(req: Request, res: Response, next: NextFunction) {
+  const u = req.user;
+  if (!u || u.role !== "ADMIN") return void res.status(403).json({ error: "Hanya Admin" });
+  if (u.acting) return void res.status(403).json({ error: 'Berhenti "bertindak sebagai" peran lain dulu untuk memakai menu ini' });
   next();
 }
 

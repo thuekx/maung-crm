@@ -10,6 +10,7 @@ import { lookupByPhone, runSync, syncStatus } from "./woSync.js";
 import { normalizePhone } from "./phone.js";
 import { leadRoutes } from "./leads.js";
 import { dashboardRoutes } from "./dashboard.js";
+import { adminRoutes } from "./adminData.js";
 import { enqueueBackfill, outboxStatus, processOutbox, retryJob } from "./woPush.js";
 import { catalogRoutes } from "./catalog.js";
 import { quotationRoutes } from "./quotations.js";
@@ -164,6 +165,7 @@ export function createApp() {
 
   r.use("/leads", leadRoutes);
   r.use("/dashboard", dashboardRoutes);
+  r.use(adminRoutes);
   r.use("/catalog", catalogRoutes);
   r.use("/quotations", quotationRoutes);
 

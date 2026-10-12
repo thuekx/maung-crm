@@ -8,14 +8,14 @@ COPY apps/api apps/api
 RUN npm run build -w apps/api
 
 FROM node:22-slim
-ENV NODE_ENV=production PORT=4000 API_BASE=/crm/api UPLOAD_DIR=/data/uploads
+ENV NODE_ENV=production PORT=4000 API_BASE=/crm/api UPLOAD_DIR=/data/uploads BACKUP_DIR=/backups
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
 RUN npm ci -w apps/api --omit=dev && npm cache clean --force
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY apps/api/migrations apps/api/migrations
-RUN mkdir -p /data/uploads && chown -R node:node /data /app
+RUN mkdir -p /data/uploads /backups && chown -R node:node /data /backups /app
 USER node
 WORKDIR /app/apps/api
 EXPOSE 4000

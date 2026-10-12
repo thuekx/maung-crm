@@ -81,8 +81,9 @@ dashboardRoutes.get("/", ah(async (req, res) => {
   // Daftar marketing untuk filter (reviewer)
   const people = reviewer ? (await pool.query("SELECT user_id AS id, name FROM wo_user_cache WHERE role IN ('MKT','ADMIN') ORDER BY name")).rows : [];
 
+  const demoRows = Number((await pool.query("SELECT (SELECT count(*) FROM leads WHERE is_demo AND deleted_at IS NULL) + (SELECT count(*) FROM quotations WHERE is_demo AND deleted_at IS NULL) + (SELECT count(*) FROM field_reports WHERE is_demo AND deleted_at IS NULL) AS n")).rows[0].n);
   res.json({
-    range: { from, to }, scope: who ? "marketing" : "semua", filters: { marketing: who, area: q.area ?? null }, people,
+    hasDemo: demoRows > 0, range: { from, to }, scope: who ? "marketing" : "semua", filters: { marketing: who, area: q.area ?? null }, people,
     field: { visits: rep.total, verified: rep.verified, unverified: rep.total - rep.verified, awaitingReview: rep.awaitingReview, needsRevision: rep.needsRevision, perMarketing: vis.rows, byType, tasks },
     leads: { created: nCreated, byStage: stages, byKind: { INTERNET: created.filter((x) => x.kind === "INTERNET").reduce((s, x) => s + x.n, 0), NON_INTERNET: created.filter((x) => x.kind === "NON_INTERNET").reduce((s, x) => s + x.n, 0) },
       won: wl.won, lost: wl.lost, open: wl.open, winRate: wl.won + wl.lost ? Math.round((wl.won / (wl.won + wl.lost)) * 1000) / 10 : null, cohortConversion: nCreated ? Math.round((cohortWon / nCreated) * 1000) / 10 : null },

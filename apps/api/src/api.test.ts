@@ -15,6 +15,7 @@ const USERS: Record<string, any> = {
   tMktTanpaAkses: { id: "u-mkt2", name: "Mkt Baru", email: "mkt2@l1v.local", role: "MKT", subRole: "STAFF", features: [] },
   tFin: { id: "u-fin", name: "Fin", email: "fin@l1v.local", role: "FIN", subRole: "STAFF", features: ["app.crm"] },
   tAdmin: { id: "u-admin", name: "Admin", email: "admin@l1v.local", role: "ADMIN", subRole: "STAFF", features: [] },
+  tAdminActing: { id: "u-admin", name: "Admin", email: "admin@l1v.local", role: "ADMIN", subRole: "STAFF", features: ["app.crm"], acting: { role: "MKT", subRole: "STAFF" } },
 };
 let wo: http.Server, api: http.Server, base = "";
 // Export API WO tiruan: customers dibagi 2 halaman (cursor); packages/areas = 404 (belum ada di WO); kunci salah = 401.
@@ -78,6 +79,15 @@ const { pool } = await import("./db.js");
 before(async () => {
   wo = http.createServer((req, res) => {
     const t = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1] ?? "";
+    if (req.url === "/api/users") { // daftar pengguna WO (Admin) — akun demo mkt@ dst.
+      if (t !== "tAdmin") { res.statusCode = 403; return void res.end("{}"); }
+      return void res.end(JSON.stringify([
+        { id: "u-admin", name: "Admin", email: "admin@l1v.local", role: "ADMIN", subRole: "STAFF", active: true },
+        { id: "u-demo-mkt", name: "Marketing Demo", email: "mkt@l1v.local", role: "MKT", subRole: "SUPERVISOR", active: true },
+        { id: "u-demo-noc", name: "NOC Demo", email: "noc@l1v.local", role: "NOC", subRole: "SUPERVISOR", active: true },
+        { id: "u-luar", name: "Orang Luar", email: "luar@contoh.com", role: "MKT", subRole: "STAFF", active: true },
+      ]));
+    }
     if (req.url === "/api/auth/me") {
       const u = USERS[t];
       res.statusCode = u ? 200 : 401;
@@ -757,5 +767,137 @@ test("Kirim CRM → WO (outbox): katalog dulu baru penawaran, jejak marketing, i
   assert.equal((await rq("tAdmin", "POST", "/wo-sync/run")).s, 200);
   assert.ok(!JSON.stringify((await rq("tAdmin", "GET", "/wo-sync")).d).includes(CRM_KEY));
   assert.equal((await rq("tMgr", "POST", "/wo-sync/run")).s, 403);
+  delete process.env.CRM_INTEGRATION_KEY;
+});
+
+test("Admin CRM: Data & Backup (backup/restore/upload/hapus), purge 3 tingkat + hanya demo, data demo (isDemo) tidak pernah dikirim ke WO, Pengaturan", async () => {
+  const j = async (r: Response) => ({ s: r.status, d: await r.json().catch(() => ({})) as any });
+  const rq = (tok: string, m: string, path: string, body?: unknown) => call(tok, m, "/crm/api" + path, body).then(j);
+  const q1 = async (sql: string, a: unknown[] = []) => (await pool.query(sql, a)).rows;
+  const fs = await import("node:fs");
+  process.env.BACKUP_DIR = "/tmp/crm-backups-test"; fs.rmSync(process.env.BACKUP_DIR, { recursive: true, force: true });
+  await pool.query("INSERT INTO wo_user_cache (user_id,name,email,role) VALUES ('u-admin','Admin','admin@l1v.local','ADMIN') ON CONFLICT (user_id) DO NOTHING");
+
+  // ── hanya Admin ASLI ──
+  for (const tok of ["tNurman", "tMgr", "tNoc", "tAdminActing"]) {
+    assert.equal((await rq(tok, "GET", "/admin/data/overview")).s, 403, tok);
+    assert.equal((await rq(tok, "GET", "/admin/settings")).s, 403, tok);
+  }
+  assert.equal((await rq("tAdmin", "GET", "/admin/data/overview")).s, 200);
+
+  // ── Pengaturan: default penawaran dipakai saat membuat penawaran; jeda kirim ke WO ──
+  const bad = await rq("tAdmin", "PUT", "/admin/settings", { quotation: { taxRate: 101, validDays: 14, terms: "x" } }); assert.equal(bad.s, 400);
+  assert.equal((await rq("tAdmin", "PUT", "/admin/settings", { quotation: { taxRate: 10, validDays: 30, terms: "Syarat uji pengaturan." } })).s, 200);
+  const st = (await rq("tAdmin", "GET", "/admin/settings")).d;
+  assert.equal(st.quotation.taxRate, 10); assert.equal(typeof st.integration.integrationKeySet, "boolean");
+  assert.ok(!JSON.stringify(st).includes(CRM_KEY) && !JSON.stringify(st).includes(EXPORT_KEY)); // nilai kunci tidak pernah keluar
+  const item = (await rq("tMgr", "POST", "/catalog", { name: "Item Pengaturan", kind: "SERVICE", unit: "paket", price: 1000000 })).d.id;
+  const ls = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Lead Pengaturan", phone: "0812 7777 0001", address: "Jl. Pengaturan No. 1, Bandung" })).d;
+  const qs = (await rq("tNurman", "POST", "/quotations", { leadId: ls.id, lines: [{ catalogId: item, qty: 1 }] })).d;
+  assert.equal(qs.taxRate, 10); assert.equal(qs.total, 1100000); assert.equal(qs.terms, "Syarat uji pengaturan.");
+  assert.equal(qs.validUntil, new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10));
+  const { processOutbox, enqueue } = await import("./woPush.js");
+  process.env.CRM_INTEGRATION_KEY = CRM_KEY;
+  await rq("tAdmin", "PUT", "/admin/settings", { woSync: { paused: true } });
+  await enqueue("CATALOG", item); woCalls.length = 0;
+  assert.equal((await processOutbox()).done, 0); assert.equal(woCalls.length, 0); // dijeda
+  assert.equal((await rq("tAdmin", "GET", "/admin/settings")).d.integration.wo.paused, true);
+  await rq("tAdmin", "PUT", "/admin/settings", { woSync: { paused: false } });
+  await pool.query("DELETE FROM wo_outbox");
+
+  // ── backup manual, daftar, unduh, unggah, hapus ──
+  const bk = await rq("tAdmin", "POST", "/admin/data/backup", { note: "uji" }); assert.equal(bk.s, 201);
+  assert.match(bk.d.name, /^crm-manual-\d{8}-\d{6}\.json\.gz$/); assert.equal(bk.d.valid, true); assert.ok(bk.d.tables.leads >= 1);
+  const dl = await fetch(`${base}/crm/api/admin/data/backups/${bk.d.name}/download`, { headers: { Authorization: "Bearer tAdmin" } });
+  assert.equal(dl.status, 200);
+  const raw = Buffer.from(await dl.arrayBuffer());
+  const zlib = await import("node:zlib");
+  const head = JSON.parse(zlib.gunzipSync(raw).toString().split("\n")[0]);
+  assert.deepEqual([head.format, head.version], ["maung-crm-backup", 1]);
+  assert.equal((await fetch(`${base}/crm/api/admin/data/backups/..%2Fetc.json.gz/download`, { headers: { Authorization: "Bearer tAdmin" } })).status, 404);
+  const upOk = new FormData(); upOk.set("file", new Blob([new Uint8Array(raw)]), "salinan.json.gz");
+  assert.equal((await fetch(`${base}/crm/api/admin/data/backups/upload`, { method: "POST", headers: { Authorization: "Bearer tAdmin" }, body: upOk })).status, 201);
+  const upBad = new FormData(); upBad.set("file", new Blob([zlib.gzipSync(Buffer.from('{"format":"maung-backup"}\n'))]), "dari-wo.json.gz"); // format WO ditolak
+  const rb = await fetch(`${base}/crm/api/admin/data/backups/upload`, { method: "POST", headers: { Authorization: "Bearer tAdmin" }, body: upBad });
+  assert.equal(rb.status, 400); assert.ok(fs.readdirSync(process.env.BACKUP_DIR).every((n) => !n.includes("dari-wo")));
+  let list = (await rq("tAdmin", "GET", "/admin/data/overview")).d; assert.ok(list.backups.length >= 2);
+  const up1 = list.backups.find((b: any) => b.name.includes("crm-upload"));
+  assert.equal((await rq("tAdmin", "DELETE", `/admin/data/backups/${up1.name}`)).s, 200);
+  assert.equal((await rq("tAdmin", "DELETE", "/admin/data/backups/..%2F..%2Fx")).s, 400);
+
+  // ── data demo: akun demo WO (tanpa membuat akun CRM), semua status, ditandai isDemo ──
+  assert.equal((await rq("tAdmin", "POST", "/admin/data/demo", { confirm: "muat demo" })).s, 400);
+  const demo = await rq("tAdmin", "POST", "/admin/data/demo", { confirm: "MUAT DEMO" });
+  assert.equal(demo.s, 200); assert.ok(demo.d.people.some((p: any) => p.id === "u-demo-mkt")); assert.ok(!demo.d.people.some((p: any) => p.id === "u-luar" || p.id === "u-demo-noc")); // hanya Admin + akun demo MKT
+  assert.deepEqual(demo.d.counts, { catalog: 4, leads: 18, quotations: 8, reports: 10, tasks: 5 });
+  assert.deepEqual((await q1("SELECT status FROM quotations WHERE is_demo ORDER BY status")).map((x) => x.status), ["ACCEPTED", "APPROVED", "CANCELLED", "DRAFT", "EXPIRED", "PENDING_APPROVAL", "REJECTED", "SENT"]);
+  assert.deepEqual((await q1("SELECT DISTINCT status FROM field_reports WHERE is_demo ORDER BY status")).map((x) => x.status), ["COMPLETED", "DRAFT", "REVIEWED", "REVISION_REQUIRED", "SUBMITTED"]);
+  assert.equal((await q1("SELECT count(*)::int n FROM leads WHERE is_demo AND (owner_id NOT IN ('u-admin','u-demo-mkt'))"))[0].n, 0);
+  assert.ok((await q1("SELECT count(*)::int n FROM leads WHERE is_demo AND created_by_name IS NOT NULL AND owner_name <> ''"))[0].n === 18); // jejak id+nama tersimpan
+  assert.equal((await rq("tAdmin", "GET", "/dashboard")).d.hasDemo, true);
+  assert.ok((await rq("tAdmin", "GET", "/dashboard")).d.leads.created >= 18);
+
+  // ── baris demo TIDAK PERNAH dikirim ke WO ──
+  woCalls.length = 0;
+  const dq = (await q1("SELECT id FROM quotations WHERE is_demo AND status='SENT'"))[0].id;
+  const dc = (await q1("SELECT id FROM catalog_items WHERE is_demo LIMIT 1"))[0].id;
+  await enqueue("QUOTATION", dq); await enqueue("CATALOG", dc);
+  assert.equal((await q1("SELECT count(*)::int n FROM wo_outbox"))[0].n, 0); // tidak diantre sama sekali
+  await pool.query("INSERT INTO wo_outbox (kind,ref_id,crm_id) VALUES ('QUOTATION',$1,'quotation-demo'),('CATALOG',$2,'catalog-demo')", [dq, dc]); // paksa baris outbox demo
+  await processOutbox(); assert.equal(woCalls.length, 0);
+  assert.equal((await q1("SELECT count(*)::int n FROM wo_outbox WHERE status='DONE'"))[0].n, 2);
+  const { enqueueBackfill } = await import("./woPush.js"); await pool.query("DELETE FROM wo_outbox"); await enqueueBackfill();
+  assert.equal((await q1("SELECT count(*)::int n FROM wo_outbox o JOIN quotations q ON o.kind='QUOTATION' AND q.id=o.ref_id WHERE q.is_demo"))[0].n, 0);
+  // lead demo → penawaran baru ikut demo; item demo tak boleh dipakai penawaran nyata
+  const dl1 = (await q1("SELECT id FROM leads WHERE is_demo AND kind='NON_INTERNET' AND stage='NEW' LIMIT 1"))[0].id;
+  const dq2 = (await rq("tAdmin", "POST", "/quotations", { leadId: dl1, lines: [{ catalogId: dc, qty: 1 }] })).d;
+  assert.equal((await q1("SELECT is_demo FROM quotations WHERE id=$1", [dq2.id]))[0].is_demo, true);
+  assert.equal((await rq("tNurman", "POST", "/quotations", { leadId: ls.id, lines: [{ catalogId: dc, qty: 1 }] })).s, 400);
+  // lead demo tidak ditautkan otomatis ke pelanggan WO
+  const { refreshLeadLinks } = await import("./leads.js"); await refreshLeadLinks();
+  assert.equal((await q1("SELECT count(*)::int n FROM leads WHERE is_demo AND customer_code IS NOT NULL"))[0].n, 0);
+
+  // ── purge hanya demo: data nyata utuh ──
+  const real = { leads: (await q1("SELECT count(*)::int n FROM leads WHERE NOT is_demo"))[0].n, quotes: (await q1("SELECT count(*)::int n FROM quotations WHERE NOT is_demo"))[0].n, cat: (await q1("SELECT count(*)::int n FROM catalog_items WHERE NOT is_demo"))[0].n };
+  assert.equal((await rq("tAdmin", "POST", "/admin/data/purge", { onlyDemo: true, confirm: "hapus data" })).s, 400);
+  const pd = await rq("tAdmin", "POST", "/admin/data/purge", { onlyDemo: true, confirm: "HAPUS DATA" });
+  assert.equal(pd.s, 200); assert.match(pd.d.backup, /^crm-pre-purge-/);
+  assert.deepEqual(await q1("SELECT (SELECT count(*)::int FROM leads WHERE is_demo) a, (SELECT count(*)::int FROM quotations WHERE is_demo) b, (SELECT count(*)::int FROM field_reports WHERE is_demo) c, (SELECT count(*)::int FROM catalog_items WHERE is_demo) d, (SELECT count(*)::int FROM field_report_comments WHERE report_id NOT IN (SELECT id FROM field_reports)) e"), [{ a: 0, b: 0, c: 0, d: 0, e: 0 }]);
+  assert.deepEqual([(await q1("SELECT count(*)::int n FROM leads"))[0].n, (await q1("SELECT count(*)::int n FROM quotations"))[0].n, (await q1("SELECT count(*)::int n FROM catalog_items"))[0].n], [real.leads, real.quotes, real.cat]);
+  assert.equal((await rq("tAdmin", "GET", "/dashboard")).d.hasDemo, false);
+  assert.equal((await q1("SELECT count(*)::int n FROM crm_settings WHERE key='demo'"))[0].n, 0);
+
+  // ── restore: round-trip + sequence tidak bentrok + admin tetap ──
+  const snap = await rq("tAdmin", "POST", "/admin/data/backup", { note: "snapshot restore" });
+  const before = (await q1("SELECT (SELECT count(*)::int FROM leads) l, (SELECT count(*)::int FROM quotations) q, (SELECT count(*)::int FROM field_reports) r, (SELECT count(*)::int FROM catalog_items) c, (SELECT count(*)::int FROM wo_customers) w"))[0];
+  assert.equal((await rq("tAdmin", "POST", "/admin/data/purge", { scope: 3, deleteUsers: true, confirm: "HAPUS DATA" })).s, 200);
+  const empty = (await q1("SELECT (SELECT count(*)::int FROM leads) l, (SELECT count(*)::int FROM quotations) q, (SELECT count(*)::int FROM catalog_items) c, (SELECT count(*)::int FROM wo_customers) w, (SELECT count(*)::int FROM crm_settings) s, (SELECT count(*)::int FROM wo_user_cache WHERE user_id='u-admin') a, (SELECT count(*)::int FROM wo_user_cache) u"))[0];
+  assert.deepEqual([empty.l, empty.q, empty.c, empty.w], [0, 0, 0, 0]); assert.ok(empty.s >= 1); assert.equal(empty.a, 1); assert.equal(empty.u, 1); // pengaturan & akun Admin selamat; cache akun lain dibersihkan
+  assert.equal((await rq("tAdmin", "POST", `/admin/data/backups/${snap.d.name}/restore`, { confirm: "restore" })).s, 400);
+  const rs = await rq("tAdmin", "POST", `/admin/data/backups/${snap.d.name}/restore`, { confirm: "RESTORE" });
+  assert.equal(rs.s, 200); assert.match(rs.d.preBackup, /^crm-pre-restore-/);
+  assert.deepEqual((await q1("SELECT (SELECT count(*)::int FROM leads) l, (SELECT count(*)::int FROM quotations) q, (SELECT count(*)::int FROM field_reports) r, (SELECT count(*)::int FROM catalog_items) c, (SELECT count(*)::int FROM wo_customers) w"))[0], before);
+  const nl = await rq("tNurman", "POST", "/leads", { kind: "INTERNET", name: "Setelah Restore", phone: "0812 6666 0001" }); // id baru tidak bentrok (sequence dimajukan)
+  assert.equal(nl.s, 201);
+  await pool.query("INSERT INTO wo_user_cache (user_id,name,email,role) VALUES ('u-nurman','Nurman','nurman@l1v.local','MKT') ON CONFLICT (user_id) DO NOTHING");
+  const nr = await rq("tNurman", "POST", "/reports", { activityType: "SURVEY", summary: "Setelah restore", picIds: ["u-nurman"] }); assert.equal(nr.s, 201);
+  assert.equal((await rq("tAdmin", "POST", "/admin/data/backups/crm-manual-20200101-000000.json.gz/restore", { confirm: "RESTORE" })).s, 400);
+
+  // ── purge cakupan 1 dan 2 ──
+  assert.equal((await rq("tAdmin", "POST", "/admin/data/purge", { scope: 1, confirm: "HAPUS DATA", backupFirst: false })).s, 200);
+  assert.deepEqual((await q1("SELECT (SELECT count(*)::int FROM leads) l, (SELECT count(*)::int FROM field_reports) r, (SELECT count(*)::int FROM wo_customers) w, (SELECT count(*)::int FROM catalog_items) c"))[0], { l: 0, r: 0, w: before.w, c: before.c }); // cermin & katalog tetap
+  assert.equal((await rq("tAdmin", "POST", "/admin/data/purge", { scope: 2, confirm: "HAPUS DATA", backupFirst: false })).s, 200);
+  assert.deepEqual((await q1("SELECT (SELECT count(*)::int FROM wo_customers) w, (SELECT count(*)::int FROM catalog_items) c"))[0], { w: 0, c: before.c });
+
+  // ── backup otomatis harian ──
+  const { autoBackupTick } = await import("./autoBackup.js");
+  const at = (h: number, m = 0) => { const d = new Date(); d.setHours(h, m, 0, 0); return d; };
+  assert.equal(await autoBackupTick(at(2, 0)), null); // belum jam 02:30
+  const auto = await autoBackupTick(at(3)); assert.match(auto!, /^crm-auto-\d{8}-\d{6}\.json\.gz$/);
+  assert.equal(await autoBackupTick(at(4)), null); // sudah ada hari ini
+  for (const n of fs.readdirSync(process.env.BACKUP_DIR!).filter((x) => x.startsWith("crm-auto-"))) fs.rmSync(`${process.env.BACKUP_DIR}/${n}`);
+  assert.equal((await rq("tAdmin", "PUT", "/admin/data/auto", { autoDaily: false })).s, 200);
+  assert.equal(await autoBackupTick(at(5)), null); // dimatikan
+  await rq("tAdmin", "PUT", "/admin/data/auto", { autoDaily: true });
   delete process.env.CRM_INTEGRATION_KEY;
 });

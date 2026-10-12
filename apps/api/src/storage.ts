@@ -1,11 +1,13 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /** Penyimpanan berkas: `local` (volume) atau `s3` (Garage/SeaweedFS/S3 mana pun). Kunci objek sama di kedua driver. */
 export interface Storage {
   put(key: string, data: Buffer, contentType: string): Promise<void>;
   get(key: string): Promise<Buffer>;
+  /** Hapus objek; tidak error bila sudah tidak ada. */
+  del(key: string): Promise<void>;
 }
 
 export class LocalStorage implements Storage {
@@ -21,6 +23,7 @@ export class LocalStorage implements Storage {
     await writeFile(p, data);
   }
   get(key: string) { return readFile(this.abs(key)); }
+  async del(key: string) { await rm(this.abs(key), { force: true }); }
 }
 
 export class S3Storage implements Storage {
@@ -37,6 +40,9 @@ export class S3Storage implements Storage {
   async get(key: string) {
     const r = await this.c.send(new GetObjectCommand({ Bucket: this.bucket, Key: key.split(path.sep).join("/") }));
     return Buffer.from(await r.Body!.transformToByteArray());
+  }
+  async del(key: string) {
+    await this.c.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key.split(path.sep).join("/") }));
   }
 }
 

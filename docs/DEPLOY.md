@@ -82,6 +82,13 @@ cd ~/maung-crm && bash scripts/check-quotation-wo.sh
    (atau satu nomor: `bash scripts/check-quotation-wo.sh QT-026-0001`). `order_wo_terbentuk=1` + nomor `WO-SO-…` = berhasil. Antrean kirim berjalan tiap ±1 menit, jadi tunggu 1–2 menit setelah klik.
 3. Cek di WO (UI): order muncul untuk marketing pembuat, jejak marketing (id + nama) terisi, SKU produk terpetakan ke barang bila SKU diisi.
 
+## E4. Admin CRM: Pengaturan & Data/Backup (ditautkan dari Pusat Admin WO)
+Halaman (hanya **Admin asli** WO; peran lain & Admin yang sedang "bertindak sebagai" ditolak API dan menu tidak tampil): `/crm/admin/settings` (bawaan penawaran, jeda kirim ke WO, status integrasi baca-saja) dan `/crm/admin/data` (ringkasan, backup/restore `.json.gz` manual + otomatis harian 02:30 simpan 7, unduh/unggah/hapus, purge 3 cakupan atau "hanya demo" dengan konfirmasi `HAPUS DATA`, data demo dengan konfirmasi `MUAT DEMO`; restore dengan konfirmasi `RESTORE`).
+- Backup disimpan di volume Docker **`crm_backups`** (`/backups` di crm-api), terpisah dari `pgdata`. **Jangan `docker compose down -v`.** Unduh salinan ke luar server secara berkala.
+- Foto ada di Garage: cadangkan dengan `cd ~/Maung-Wo-Inv && bash scripts/garage-backup.sh` (backup database tidak memuat isi foto). Opsi "hapus berkas foto di Garage" pada purge **tidak bisa dibatalkan** oleh restore database (bawaan: mati).
+- Data demo: id & nama diambil dari WO (`GET /api/users` dengan token Admin: akun `mkt@…`) + Admin yang login; **tidak membuat akun di CRM**. Semua baris `is_demo`; outbox ke WO dan penautan otomatis pelanggan WO **melewati baris demo** (diuji).
+- Setelah `update.sh` pertama dengan versi ini, volume `crm_backups` dibuat otomatis oleh compose.
+
 ## E. Yang sudah dan belum teruji
 - Teruji otomatis (CI): tes API, tes web (termasuk larangan HTML mentah), tes aturan compose, validasi compose, **alur `update.sh` dan `setup-deploy-key.sh` dengan docker/curl/ssh/git tiruan** (`tests/server-scripts/`: migrasi sukses, tiap jenis kegagalan + rollback, update kedua, host salah, root, `.env`/container WO berubah, secret tidak tercetak).
 - **Belum pernah dijalankan di server asli**: container sungguhan, Garage asli, Caddy `crm.caddy`, `/api/auth/me` WO asli (E2E memakai mock). Risiko ini dicatat; RESULT `update.sh` adalah buktinya.

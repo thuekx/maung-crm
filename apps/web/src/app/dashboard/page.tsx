@@ -84,6 +84,7 @@ export default function Dashboard() {
           <div>
             <p className="text-sm text-white/70">{hello}{firstName ? "," : ""}</p>
             <h1 className="font-display text-2xl font-semibold">{firstName || "Dashboard"}</h1>
+            {d?.hasDemo && <p className="mt-1 inline-flex rounded-full bg-accent-500/20 px-2 py-0.5 text-[11px] font-semibold text-accent-300">Data demo ikut dihitung</p>}
             {d && <p className="mt-1 text-xs text-white/70">{fmtShort(d.range.from)} – {fmtShort(d.range.to)}{d.scope === "marketing" && !d.people?.length ? " · data Anda" : ""}</p>}
           </div>
           <button className="rounded-xl bg-white/10 p-2.5 transition hover:bg-white/20" onClick={() => setShow(!show)} aria-label="Filter" aria-expanded={show}><Icon name="settings" size={18} /></button>

@@ -4,6 +4,7 @@ import { audit, pool } from "./db.js";
 import { isReviewer, type Principal } from "./auth.js";
 import { advanceLead } from "./leads.js";
 import { enqueue } from "./woPush.js";
+import { getSetting } from "./settings.js";
 import { woCustomerProblems } from "./woPayload.js";
 
 const fail = (status: number, error: string) => Object.assign(new Error(error), { status });
@@ -14,7 +15,6 @@ type Q = { query: typeof pool.query };
 
 export const STATUSES = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "SENT", "ACCEPTED", "REJECTED", "EXPIRED", "CANCELLED"] as const;
 const LIVE = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "SENT"];
-export const DEFAULT_TERMS = "Harga dalam Rupiah. Penawaran berlaku sampai tanggal yang tertera. Pekerjaan dimulai setelah penawaran disetujui dan pembayaran sesuai kesepakatan. Berita Acara ditandatangani setelah pekerjaan selesai.";
 
 const lineSchema = z.object({
   catalogId: z.coerce.number().int().positive(),
@@ -71,14 +71,16 @@ async function nextNumber(db: Q, d: Date) {
 /** Ganti seluruh baris dari katalog aktif; nama/jenis/satuan disalin (penawaran tidak berubah bila katalog diubah). */
 async function writeLines(db: Q, id: number, lines: z.infer<typeof lineSchema>[]) {
   const ids = [...new Set(lines.map((l) => l.catalogId))];
-  const cat = ids.length ? (await db.query("SELECT id,name,sku,kind,unit,price,active FROM catalog_items WHERE id=ANY($1)", [ids])).rows : [];
+  const cat = ids.length ? (await db.query("SELECT id,name,sku,kind,unit,price,active,is_demo FROM catalog_items WHERE id=ANY($1)", [ids])).rows : [];
   const by = new Map(cat.map((c: any) => [Number(c.id), c]));
+  const demoQ = !!(await db.query("SELECT is_demo FROM quotations WHERE id=$1", [id])).rows[0]?.is_demo;
   await db.query("DELETE FROM quotation_lines WHERE quotation_id=$1", [id]);
   const priced: { qty: number; unitPrice: number }[] = [];
   for (const [i, l] of lines.entries()) {
     const c: any = by.get(l.catalogId);
     if (!c) throw fail(400, `Item katalog #${l.catalogId} tidak ada`);
     if (!c.active) throw fail(400, `Item katalog "${c.name}" nonaktif`);
+    if (c.is_demo && !demoQ) throw fail(400, `Item "${c.name}" adalah data demo — hanya untuk penawaran demo`);
     const unitPrice = l.unitPrice ?? Number(c.price);
     priced.push({ qty: l.qty, unitPrice });
     await db.query("INSERT INTO quotation_lines (quotation_id,position,catalog_id,name,sku,kind,unit,qty,unit_price,note) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
@@ -127,6 +129,7 @@ quotationRoutes.post("/", ah(async (req, res) => {
   if (!lead) throw fail(404, "Lead tidak ditemukan");
   if (lead.kind !== "NON_INTERNET") throw fail(409, "Penawaran hanya untuk lead non-internet / layanan tambahan (lead internet didaftarkan di MSRadius)");
   if (["WON", "LOST"].includes(lead.stage)) throw fail(409, "Lead sudah ditutup");
+  const cfg = await getSetting("quotation"); // default dari Pengaturan CRM
   const c = await pool.connect();
   let id: number;
   try {
@@ -134,12 +137,12 @@ quotationRoutes.post("/", ah(async (req, res) => {
     const number = await nextNumber(c, new Date());
     const lines = b.lines ?? [];
     const r = await c.query(
-      `INSERT INTO quotations (number,lead_id,owner_id,owner_name,customer_code,customer_name,customer_phone,customer_email,customer_address,pic_name,subject,valid_until,terms,notes,tax_rate,discount,created_by,created_by_name)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
+      `INSERT INTO quotations (number,lead_id,owner_id,owner_name,customer_code,customer_name,customer_phone,customer_email,customer_address,pic_name,subject,valid_until,terms,notes,tax_rate,discount,created_by,created_by_name,is_demo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
       [number, lead.id, lead.owner_id, lead.owner_name, lead.customer_code, b.customerName ?? lead.name, b.customerPhone ?? lead.phone, b.customerEmail ?? lead.email, b.customerAddress ?? lead.address,
-       b.picName ?? null, b.subject ?? lead.interest ?? null, b.validUntil ?? new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10), b.terms ?? DEFAULT_TERMS, b.notes ?? null, b.taxRate ?? 11, b.discount ?? 0, u.id, u.name]);
+       b.picName ?? null, b.subject ?? lead.interest ?? null, b.validUntil ?? new Date(Date.now() + cfg.validDays * 86_400_000).toISOString().slice(0, 10), b.terms ?? cfg.terms, b.notes ?? null, b.taxRate ?? cfg.taxRate, b.discount ?? 0, u.id, u.name, !!lead.is_demo]); // penawaran dari lead demo ikut demo → tak pernah dikirim ke WO
     id = r.rows[0].id;
-    const t = totals(await writeLines(c, id, lines), b.discount ?? 0, b.taxRate ?? 11);
+    const t = totals(await writeLines(c, id, lines), b.discount ?? 0, b.taxRate ?? cfg.taxRate);
     await c.query("UPDATE quotations SET subtotal=$2, tax_amount=$3, total=$4 WHERE id=$1", [id, t.subtotal, t.taxAmount, t.total]);
     await event(c, id, "CREATED", { to: "DRAFT", actor: u });
     await advanceLead(c, lead.id, "QUOTING", `Penawaran ${number} dibuat`, u);

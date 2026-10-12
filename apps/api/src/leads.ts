@@ -113,7 +113,7 @@ async function followCustomer(db: Q, lead: any): Promise<boolean> {
 /** Setelah sinkron cermin: tautkan otomatis lead internet yang belum tertaut, lalu ikuti status pelanggan WO. */
 export async function refreshLeadLinks(): Promise<{ linked: number; moved: number }> {
   let linked = 0, moved = 0;
-  const open = await pool.query("SELECT * FROM leads WHERE deleted_at IS NULL AND kind='INTERNET' AND stage = ANY($1) ORDER BY id", [OPEN]);
+  const open = await pool.query("SELECT * FROM leads WHERE deleted_at IS NULL AND NOT is_demo AND kind='INTERNET' AND stage = ANY($1) ORDER BY id", [OPEN]);
   for (const lead of open.rows) {
     if (!lead.customer_code && lead.link_state === "NONE" && lead.phone) {
       const m = await lookupByPhone(lead.phone);
