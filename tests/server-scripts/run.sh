@@ -110,7 +110,7 @@ cprep() { setup $1; touch $S/stub-$1/crm_up; mkdir -p $S/home-$1/Maung-Wo-Inv/pr
 cprep c1; own $S/stub-c1; runc c1
 chk "C1 jalur belum dipasang → NEXT app-route.sh add crm (container sehat)" "has c1 'jalur belum dipasang' && has c1 'scripts/app-route.sh add crm' && has c1 'crm_api=healthy' && has c1 'perubahan_ke_sistem=TIDAK_ADA'"
 cprep c2; cp $REPO/deploy/crm.caddy $S/home-c2/Maung-Wo-Inv/proxy/apps/crm.caddy; own $S/home-c2; runc c2
-chk "C2 berkas ada tetapi belum dimuat Caddy → ulang app-route.sh" "has c2 'belum dimuat container Caddy' && has c2 'isi_sama_dengan_deploy_crm_caddy=ya'"
+chk "C2 berkas ada tetapi belum dimuat Caddy → ulang app-route.sh" "has c2 'belum dimuat container Caddy' && has c2 'isi_sama_dengan_deploy_crm_caddy=ya (identik)'"
 cprep c3; cp $REPO/deploy/crm.caddy $S/home-c3/Maung-Wo-Inv/proxy/apps/crm.caddy; touch $S/stub-c3/route_in_container; own $S/home-c3 $S/stub-c3; runc c3
 chk "C3 Caddyfile aktif tanpa import → WO belum diperbarui" "has c3 \"belum memuat 'import /etc/caddy/apps/*.caddy'\""
 cprep c4; cp $REPO/deploy/crm.caddy $S/home-c4/Maung-Wo-Inv/proxy/apps/crm.caddy; touch $S/stub-c4/route_in_container $S/stub-c4/caddy_import; printf 200 > $S/stub-c4/caddy_health; printf 200 > $S/stub-c4/caddy_crm; own $S/home-c4 $S/stub-c4; runc c4
@@ -119,6 +119,10 @@ cprep c5; touch $S/stub-c5/unhealthy_crmapi_id; own $S/stub-c5; runc c5
 chk "C5 container CRM tidak sehat → diarahkan ke update.sh" "has c5 'container CRM bermasalah' && has c5 'PERBAIKI_CONTAINER_CRM'"
 cprep c6; EXPECT_HOST_OVERRIDE=salah runc c6
 chk "C6 host salah ditolak" "has c6 'HOST SALAH'"
+cprep c7; { echo "# komentar lama berbeda"; sed 's/^#.*//' $REPO/deploy/crm.caddy; } > $S/home-c7/Maung-Wo-Inv/proxy/apps/crm.caddy; own $S/home-c7; runc c7
+chk "C7 hanya komentar berbeda → tidak diperingatkan sebagai BEDA" "has c7 'ya (aturan sama; hanya komentar/spasi berbeda)' && ! has c7 'BEDA-ATURAN'"
+cprep c8; printf 'handle /crm/* {\n\treverse_proxy crm-web:3001\n}\n' > $S/home-c8/Maung-Wo-Inv/proxy/apps/crm.caddy; own $S/home-c8; runc c8
+chk "C8 aturan berbeda (port lain) → BEDA-ATURAN + saran pasang ulang" "has c8 'isi_sama_dengan_deploy_crm_caddy=BEDA-ATURAN' && has c8 'app-route.sh add crm'"
 chk "C* tidak ada perintah yang mengubah (hanya baca: tak ada up/rm/stop/start/restart/pull)" "! grep -qE 'compose (up|rm|stop|start|restart|pull)|docker (rm|stop|start|restart)' $S/stub-c1/calls.log $S/stub-c4/calls.log"
 
 echo; echo "UPDATE.SH TOTAL: lulus=$PASS gagal=$FAILC"; [ "$FAILC" = 0 ]

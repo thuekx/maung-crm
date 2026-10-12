@@ -52,7 +52,11 @@ echo "$nn" | grep -qw maung_edge && { S_EDGE=ya; ok "crm-api di jaringan maung_e
 
 phase "Jalur di sisi WO (baca-saja)"
 F="$WO_DIR/proxy/apps/crm.caddy"
-if [ -f "$F" ]; then S_FILE=ada; ok "berkas $F ada"; if cmp -s "$F" "$HERE/deploy/crm.caddy"; then S_SAME=ya; ok "isinya sama dengan deploy/crm.caddy"; else S_SAME=BEDA; warn "isi berbeda dari deploy/crm.caddy (diubah manual / versi lama)"; fi
+norm() { sed 's/#.*//' "$1" | tr -s ' \t' ' ' | sed 's/^ //; s/ $//' | grep -v '^$'; }
+if [ -f "$F" ]; then S_FILE=ada; ok "berkas $F ada"
+  if cmp -s "$F" "$HERE/deploy/crm.caddy"; then S_SAME="ya (identik)"; ok "isinya identik dengan deploy/crm.caddy"
+  elif [ "$(norm "$F")" = "$(norm "$HERE/deploy/crm.caddy")" ]; then S_SAME="ya (aturan sama; hanya komentar/spasi berbeda)"; ok "aturan identik dengan deploy/crm.caddy (hanya komentar berbeda — tidak berpengaruh)"
+  else S_SAME="BEDA-ATURAN"; warn "ATURAN berbeda dari deploy/crm.caddy (diubah manual / versi lama) — pasang ulang: cd ~/Maung-Wo-Inv && bash scripts/app-route.sh add crm </dev/null"; fi
 else S_FILE=TIDAK-ADA; warn "proxy/apps/crm.caddy belum ada di $WO_DIR — jalur belum dipasang"; fi
 ls "$WO_DIR/proxy/apps" 2>/dev/null | sed 's/^/    proxy\/apps: /'
 cc=$(docker ps -q --filter "label=com.docker.compose.project=maung-wo-inv" --filter "label=com.docker.compose.service=caddy" | head -1)
