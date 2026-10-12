@@ -29,6 +29,7 @@ Express 5 + TypeScript + Prisma 7 (adapter-pg) + PostgreSQL 16 (PostGIS bila per
 Keputusan terbuka untuk pemilik: lokasi object storage (MinIO/Garage vs volume), apakah memakai PostGIS, apakah Lead/Opportunity memakai master pelanggan WO atau modul CRM sendiri.
 
 ## Preferensi cara kerja dari pemilik (wajib diikuti)
+- **Setiap kali menyuruh pemilik menjalankan sesuatu, TULIS PERINTAH LENGKAPNYA di pesan yang sama** (blok kode siap salin-tempel, satu per langkah). DILARANG menulis "jalankan update.sh seperti biasa", "ulangi langkah tadi", atau merujuk ke pesan/dokumen lain tanpa menuliskan perintahnya. Ini sudah beberapa kali diingatkan pemilik.
 - **Perintah ke server = SATU skrip otomatis berfase**, bukan langkah manual terpisah. Format keluaran seperti contoh pemilik: banner `====`, `[n/N] nama fase`, baris `✓`/`!`/`✗`, lalu blok `RESULT` berisi `kunci=nilai` (status, proof/audit log, apa yang TIDAK diubah) dan baris akhir `RESULT : ... PASS/GAGAL / NEXT=...`. Contoh: `scripts/update.sh`.
 - **Guard dulu sebelum eksekusi**: tampilkan `pwd`, cek direktori (kosong / repo yang benar / bukan folder aplikasi lain), buat direktori baru khusus untuk aplikasi, dan hentikan tanpa mengubah apa pun bila ragu. Jangan jalankan perintah di direktori yang belum diperiksa (insiden: `cp .env.example .env` menimpa `.env` Maung WO saat `cd` gagal).
 - Skrip menulis log audit ke `~/maung-crm-logs/`, tidak pernah mencetak secret, dan tidak menimpa `.env`.
