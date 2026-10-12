@@ -353,6 +353,19 @@ test("Katalog & penawaran: hitung total di server, alur status, revisi, kunci se
   const cctv = (await rq("tMgr", "POST", "/catalog", { name: "CCTV Dome 2MP", kind: "PRODUCT", unit: "unit", price: 850000 })).d.id;
   const pasang = (await rq("tMgr", "POST", "/catalog", { name: "Jasa Instalasi CCTV", kind: "SERVICE", unit: "titik", price: 150000 })).d.id;
   assert.ok(wifi && cctv && pasang);
+  // SKU opsional: tanpa SKU tetap sah; SKU unik (tak peka huruf) bila diisi; "" = hapus
+  const sk = (await rq("tMgr", "POST", "/catalog", { name: "Router AX", sku: "RTR-AX-01", kind: "PRODUCT", unit: "unit", price: 500000 })).d.id;
+  assert.equal((await rq("tMgr", "POST", "/catalog", { name: "Router AX2", sku: "rtr-ax-01", kind: "PRODUCT" })).s, 409);
+  assert.equal((await rq("tMgr", "POST", "/catalog", { name: "Router Bad", sku: "bad sku!", kind: "PRODUCT" })).s, 400);
+  const nosku = (await rq("tMgr", "GET", "/catalog?all=1")).d;
+  assert.equal(nosku.find((c: any) => c.id === sk).sku, "RTR-AX-01"); assert.equal(nosku.find((c: any) => c.id === cctv).sku, null);
+  assert.equal((await rq("tMgr", "PATCH", `/catalog/${sk}`, { sku: "" })).s, 200);
+  assert.equal((await rq("tMgr", "GET", "/catalog?all=1")).d.find((c: any) => c.id === sk).sku, null);
+  assert.equal((await rq("tMgr", "PATCH", `/catalog/${cctv}`, { sku: "CCTV-DOME-2MP" })).s, 200);
+  const keep = (await rq("tMgr", "GET", "/catalog?all=1")).d.find((c: any) => c.id === cctv);
+  assert.deepEqual([keep.price, keep.unit], [850000, "unit"]); // PATCH sebagian tidak mereset harga/satuan
+  await rq("tMgr", "PATCH", `/catalog/${pasang}`, { active: true });
+  assert.deepEqual((await rq("tMgr", "GET", "/catalog?all=1")).d.filter((c: any) => c.id === pasang).map((c: any) => [c.price, c.unit]), [[150000, "titik"]]);
   assert.equal((await rq("tMgr", "POST", "/catalog", { name: "home 20", kind: "SERVICE" })).s, 409); // = paket internet WO
   assert.equal((await rq("tMgr", "POST", "/catalog", { name: "SEWA wifi", kind: "SERVICE" })).s, 409); // duplikat (tak peka huruf)
   assert.equal((await rq("tNurman", "GET", "/catalog")).d.length >= 3, true);
@@ -372,6 +385,7 @@ test("Katalog & penawaran: hitung total di server, alur status, revisi, kunci se
   assert.match(q.number, /^QT-\d{3}-0001$/);
   // subtotal = 4*850000 + 4*125000 + 12*100000 = 3.400.000+500.000+1.200.000 = 5.100.000; −50.000; PPN 11% = 555.500; total 5.605.500
   assert.deepEqual([q.subtotal, q.taxAmount, q.total], [5100000, 555500, 5605500]);
+  assert.equal(q.lines[0].sku, "CCTV-DOME-2MP"); assert.equal(q.lines[1].sku, null); // salinan SKU di baris (null = dipetakan manual)
   assert.equal(q.lines[1].unitPrice, 125000); assert.equal(q.lines[0].name, "CCTV Dome 2MP");
   assert.equal(q.lead.stage, "QUOTING"); // lead maju otomatis
   assert.equal((await rq("tNurman", "POST", "/quotations", { leadId: lead.id, discount: 1, lines: [{ catalogId: wifi, qty: 0 }] })).s, 400);

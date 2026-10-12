@@ -35,10 +35,12 @@ Badan permintaan (usulan):
   "validUntil": "2026-11-30", "sentAt": "…", "decidedAt": "…", "lostReason": "…",
   "customer": { "code": null /* kode pelanggan WO bila Lead untuk pelanggan existing; null = pelanggan baru */, "name": "…", "phone": "628…", "email": "…", "address": "…", "lat": null, "lng": null, "areaCode": "…", "picName": "…" },
   "marketingName": "…",
-  "lines": [ { "catalogCrmId": "uuid", "name": "…", "kind": "SERVICE", "qty": 1, "unit": "paket", "unitPrice": 0, "note": "…" } ],
+  "lines": [ { "catalogCrmId": "uuid", "sku": "opsional/null", "name": "…", "kind": "SERVICE", "qty": 1, "unit": "paket", "unitPrice": 0, "note": "…" } ],
   "total": 0, "taxNote": "PPN …", "terms": "…"
 }
 ```
+SKU pada baris bersifat **opsional** (kolom `sku` di katalog CRM, unik bila diisi): bila ada, WO memakainya untuk memetakan ke master barang; bila `null`, Marketing memetakan manual di WO.
+
 Pertanyaan keputusan pemilik: **apakah harga ikut dikirim ke WO?** Rekomendasi: ya (WO butuh angka untuk "trigger invoice"), tetapi **tidak** dimasukkan ke Export API (sama seperti `installFee/monthlyFee` pada `subscriptions`).
 
 ## C. Status penawaran (usulan) dan pemetaan ke WO

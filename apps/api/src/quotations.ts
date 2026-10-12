@@ -68,7 +68,7 @@ async function nextNumber(db: Q, d: Date) {
 /** Ganti seluruh baris dari katalog aktif; nama/jenis/satuan disalin (penawaran tidak berubah bila katalog diubah). */
 async function writeLines(db: Q, id: number, lines: z.infer<typeof lineSchema>[]) {
   const ids = [...new Set(lines.map((l) => l.catalogId))];
-  const cat = ids.length ? (await db.query("SELECT id,name,kind,unit,price,active FROM catalog_items WHERE id=ANY($1)", [ids])).rows : [];
+  const cat = ids.length ? (await db.query("SELECT id,name,sku,kind,unit,price,active FROM catalog_items WHERE id=ANY($1)", [ids])).rows : [];
   const by = new Map(cat.map((c: any) => [Number(c.id), c]));
   await db.query("DELETE FROM quotation_lines WHERE quotation_id=$1", [id]);
   const priced: { qty: number; unitPrice: number }[] = [];
@@ -78,15 +78,15 @@ async function writeLines(db: Q, id: number, lines: z.infer<typeof lineSchema>[]
     if (!c.active) throw fail(400, `Item katalog "${c.name}" nonaktif`);
     const unitPrice = l.unitPrice ?? Number(c.price);
     priced.push({ qty: l.qty, unitPrice });
-    await db.query("INSERT INTO quotation_lines (quotation_id,position,catalog_id,name,kind,unit,qty,unit_price,note) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-      [id, i, c.id, c.name, c.kind, c.unit, l.qty, unitPrice, l.note ?? null]);
+    await db.query("INSERT INTO quotation_lines (quotation_id,position,catalog_id,name,sku,kind,unit,qty,unit_price,note) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+      [id, i, c.id, c.name, c.sku ?? null, c.kind, c.unit, l.qty, unitPrice, l.note ?? null]);
   }
   return priced;
 }
 
 async function detail(q: any) {
   const [lines, events, revs, lead] = await Promise.all([
-    pool.query(`SELECT id, position, catalog_id AS "catalogId", name, kind, unit, qty, unit_price AS "unitPrice", note FROM quotation_lines WHERE quotation_id=$1 ORDER BY position`, [q.id]),
+    pool.query(`SELECT id, position, catalog_id AS "catalogId", name, sku, kind, unit, qty, unit_price AS "unitPrice", note FROM quotation_lines WHERE quotation_id=$1 ORDER BY position`, [q.id]),
     pool.query(`SELECT id, type, from_status AS "fromStatus", to_status AS "toStatus", note, actor_name AS "actorName", at FROM quotation_events WHERE quotation_id=$1 ORDER BY at, id`, [q.id]),
     pool.query(`SELECT rev, reason, actor_name AS "actorName", at, snapshot->>'total' AS total, snapshot->>'status' AS status FROM quotation_revisions WHERE quotation_id=$1 ORDER BY rev`, [q.id]),
     pool.query(`SELECT id, name, stage, kind, customer_code AS "customerCode" FROM leads WHERE id=$1`, [q.lead_id]),
