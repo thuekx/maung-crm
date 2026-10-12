@@ -76,6 +76,7 @@ case "$cmd" in
         shift_t=0; [ "$1" = "-T" ] && shift; svc="$1"; shift; a="$*"
         case "$svc" in
           postgres) case "$a" in *psql*)
+              case "$a" in *"count(*) FROM quotations"*) cat "$STUB/qcount" 2>/dev/null || echo 3; exit 0 ;; esac
               case "$a" in *"FROM quotations"*) cat "$STUB/quots" 2>/dev/null || echo "7|QT-026-0007|rev1|ACCEPTED|WO:WON rev1|WO-SO-0001|Nurman (u-nurman)"; exit 0 ;; esac
               case "$a" in *wo_outbox*) cat "$STUB/outbox" 2>/dev/null || echo "pending:0 blocked:0"; exit 0 ;; esac
               case "$a" in *"last_error IS NOT NULL"*) cat "$STUB/sync_err" 2>/dev/null ;; *) f sync_empty || echo "customers=5(full) packages=3(derived) subscriptions=2(full)" ;; esac; exit 0 ;; esac

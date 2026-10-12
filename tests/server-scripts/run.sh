@@ -212,6 +212,10 @@ lprep l4; echo "401 - - -" > $S/stub-l4/wo_get; own $S/stub-l4; runl l4
 chk "L4 kunci ditolak (401) → ATTENTION" "has l4 'status=ATTENTION' && has l4 'menolak kunci integrasi'"
 lprep l5; echo "5|QT-026-0005|rev1|DRAFT|WO:- rev-|-|Nurman (u-nurman)" > $S/stub-l5/quots; own $S/stub-l5; runl l5
 chk "L5 hanya draf → belum ada yang dicek, arah kirim penawaran uji" "has l5 'penawaran_diperiksa=0' && has l5 'KIRIM_PENAWARAN_UJI'"
+lprep l8; echo 0 > $S/stub-l8/qcount; own $S/stub-l8; runl l8
+chk "L8 belum ada penawaran sama sekali → BELUM_ADA (bukan FAIL), exit 0, langkah uji ditampilkan" "has l8 'status=BELUM_ADA' && has l8 'BELUM ADA penawaran' && has l8 'BUAT_PENAWARAN_UJI' && [ \"\$(cat $S/rc-l8)\" = 0 ]"
+lprep l9; echo "ERROR" > $S/stub-l9/qcount; own $S/stub-l9; runl l9
+chk "L9 tabel tak terbaca → FAIL dengan petunjuk update.sh" "has l9 'status=FAIL' && has l9 'tabel penawaran tidak terbaca'"
 lprep l6; ARGS="'QT-1;rm -rf'" runl l6
 chk "L6 filter berbahaya ditolak" "has l6 'filter hanya boleh'"
 lprep l7; EXPECT_HOST_OVERRIDE=salah runl l7

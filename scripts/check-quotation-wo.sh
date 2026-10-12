@@ -37,6 +37,15 @@ ok "guard lolos"
 
 phase "Penawaran di CRM"
 q() { dc exec -T postgres psql -U crm -d maung_crm -Atc "$1" 2>/dev/null | tr -d '\r'; }
+CNT=$(q "SELECT count(*) FROM quotations WHERE deleted_at IS NULL"); CNT="${CNT:-x}"
+[[ "$CNT" =~ ^[0-9]+$ ]] || fail "tabel penawaran tidak terbaca dari database CRM — jalankan dulu: cd ~/maung-crm && git pull --ff-only origin main && bash scripts/update.sh </dev/null"
+if [ "$CNT" = 0 ]; then
+  STATUS=BELUM_ADA; NEXT="BUAT_PENAWARAN_UJI"
+  ok "database CRM sehat, tetapi BELUM ADA penawaran sama sekali (wajar sebelum uji)"
+  echo "  Langkah (di CRM, akun Marketing): Lead non-internet → Buat penawaran (alamat & telepon valid) → Ajukan → (Manager) Setujui → Tandai terkirim → Pelanggan menyetujui."
+  echo "  Beri nama pelanggan uji yang jelas (mis. \"UJI CRM-WO\"); order uji di WO dibatalkan sesudahnya. Lalu jalankan skrip ini lagi."
+  result; exit 0
+fi
 ROWS=$(q "SELECT id||'|'||number||'|rev'||rev||'|'||status||'|WO:'||COALESCE(wo_synced_status,'-')||' rev'||COALESCE(wo_synced_rev::text,'-')||'|'||COALESCE(wo_number,'-')||'|'||marketing FROM (SELECT id, number, rev, status, wo_synced_status, wo_synced_rev, wo_number, owner_name||' ('||owner_id||')' AS marketing FROM quotations WHERE deleted_at IS NULL AND ('${FILTER}'='' OR number='${FILTER}') ORDER BY id DESC LIMIT 5) t")
 [ -n "$ROWS" ] || fail "tidak ada penawaran ${FILTER:+bernomor $FILTER}"
 echo "  id|nomor|rev|status CRM|terakhir terkirim ke WO|nomor order WO (tersimpan di CRM)|marketing"
