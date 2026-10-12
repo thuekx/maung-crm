@@ -58,7 +58,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen md:pl-60 print:pl-0">
+    <div className="app-shell min-h-screen md:pl-60 print:pl-0">
       {/* Sidebar (desktop) */}
       <aside className="fixed inset-y-0 left-0 z-[1000] hidden w-60 flex-col bg-brand-900 text-white md:flex dark:bg-brand-950 print:hidden">
         <div className="flex items-center gap-3 border-b border-white/10 px-5 py-5">

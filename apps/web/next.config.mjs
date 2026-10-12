@@ -7,7 +7,7 @@ const API = process.env.API_URL;
 
 // CSP dasar (produksi saja; dev butuh eval). script-src memakai 'unsafe-inline' karena hidrasi Next tanpa nonce —
 // ini membatasi pemuatan skrip/sumber eksternal dan eksfiltrasi lewat connect/img/form, BUKAN pelindung XSS penuh.
-const csp = [
+const cspFor = (frameAncestors) => [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
@@ -17,8 +17,11 @@ const csp = [
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
-  "frame-ancestors 'none'",
+  `frame-ancestors ${frameAncestors}`,
 ].join("; ");
+const csp = cspFor("'none'");
+// Hanya /crm/admin/* boleh ditanam (iframe) oleh halaman se-origin (Pusat Admin WO); semua jalur lain tetap 'none'.
+const cspAdmin = cspFor("'self'");
 
 export default {
   output: "standalone",
@@ -34,6 +37,10 @@ export default {
       { key: "Referrer-Policy", value: "same-origin" },
       { key: "Permissions-Policy", value: "camera=(self), geolocation=(self), microphone=()" },
     ];
-    return [{ source: "/:path*", headers: isProd ? [...common, { key: "Content-Security-Policy", value: csp }] : common }];
+    const withCsp = (v) => (isProd ? [...common, { key: "Content-Security-Policy", value: v }] : common);
+    return [
+      { source: "/admin/:path*", headers: withCsp(cspAdmin) },
+      { source: "/((?!admin(?:/|$)).*)", headers: withCsp(csp) },
+    ];
   },
 };

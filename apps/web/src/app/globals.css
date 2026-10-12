@@ -95,3 +95,9 @@ body { @apply bg-slate-50 text-slate-800 antialiased; }
 .dark .list-card:hover { border-color: rgb(245 158 11 / .45); }
 .dark .border-slate-200 { border-color: rgb(255 255 255 / .1); }
 .dark .bg-slate-50 { background-color: #0b1c35; }
+
+/* ── Mode tanam (?embed=1 di /admin/*): hanya isi halaman, latar transparan ── */
+html.embed, html.embed body { background: transparent !important; min-height: 0 !important; }
+html.embed .app-shell { padding-left: 0 !important; min-height: 0 !important; }
+html.embed .app-shell > aside, html.embed .app-shell > header, html.embed .app-shell > nav { display: none !important; }
+html.embed .app-shell > main { max-width: none !important; padding: 0 !important; }
