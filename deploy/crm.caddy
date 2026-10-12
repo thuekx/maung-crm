@@ -1,9 +1,13 @@
 # crm.caddy — jalur /crm pada domain WO. Dipasang oleh PEMILIK lewat skrip WO (CRM tidak menyentuh Caddy/WO):
 #   cd ~/Maung-Wo-Inv && bash scripts/app-route.sh add crm </dev/null     (sumber bawaan: ~/maung-crm/deploy/crm.caddy)
 # Aturan WO (dicek otomatis): hanya blok `handle /crm...` → `reverse_proxy <layanan>:<port>`; upstream bukan layanan WO.
-# Aturan lebih spesifik ditulis LEBIH DULU. Pasang SETELAH `scripts/update.sh` CRM sukses (sebelum itu /crm = 502).
+# Aturan lebih spesifik ditulis LEBIH DULU. `handle /crm` (tepat) disertakan eksplisit supaya berkas ini benar walau
+# dipasang tanpa app-route.sh (`/crm/*` saja TIDAK mencocokkan `/crm`). Pasang SETELAH `scripts/update.sh` CRM sukses.
 handle /crm/api/* {
 	reverse_proxy crm-api:4000
+}
+handle /crm {
+	reverse_proxy crm-web:3000
 }
 handle /crm/* {
 	reverse_proxy crm-web:3000

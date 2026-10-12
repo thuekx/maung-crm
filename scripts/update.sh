@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# MAUNG CRM — update aman (berfase): guard → snapshot WO (baca-saja) → .env → backup → tarik image → up → Garage → bukti → finalisasi.
+# MAUNG CRM — update aman (berfase): guard → snapshot WO (baca-saja) → .env → backup DB → tarik image → up → penyimpanan objek → bukti → finalisasi.
+# Garage = stack BERSAMA `maung-garage` (repo WO; scripts/garage-platform.sh) — CRM tidak lagi menjalankan/mencadangkan Garage sendiri.
 # Rollback otomatis bila gagal. Tidak menyentuh Maung WO (tidak membuat/menimpa/mengubah .env WO; diverifikasi dengan checksum).
 # Jalankan:  cd ~/maung-crm && git pull --ff-only origin main && bash scripts/update.sh </dev/null
 set -uo pipefail
@@ -22,7 +23,7 @@ COMMIT=""; TAG=""; PREV_TAG=""; WO_URL=""; LEGACY_IDS=""; PREV_MODE=no
 V_HOST=n/a; V_WOENV=n/a; V_WOCT=n/a; V_LOGIN_B=n/a; V_BRAND_B=n/a; V_LOGIN_A=n/a; V_BRAND_A=n/a
 V_PGDUMP=n/a; V_GARAGEBK=n/a; V_PULL=n/a; V_UP=n/a; V_GARAGE=n/a
 E_ME=n/a; E_INT=n/a; E_ME_NOTOKEN=n/a; E_PROBE_API=n/a; E_PROBE_WEB=n/a; E_NET=n/a; E_PORTS=n/a
-C_HEALTH=n/a; C_CRM=n/a; LEGACY_REMOVED=n/a; PORT3100=n/a
+C_HEALTH=n/a; C_CRM=n/a; LEGACY_REMOVED=n/a; PORT3100=n/a; E_S3=n/a; G_EDGE=n/a
 
 dc() { docker compose "$@"; }
 getenv() { grep -m1 "^$1=" "$ENVF" 2>/dev/null | cut -d= -f2- | tr -d "'\"" || true; }
@@ -41,7 +42,7 @@ mask() { sed -E 's#(://[^:/@ ]+:)[^@ ]+@#\1***@#g; s/((secret|password|token|pas
 diag() {
   echo; echo "── DIAGNOSIS (baca-saja, secret disamarkan) ──"
   dc ps -a --format 'table {{.Service}}\t{{.Status}}' 2>&1 | head -12
-  for s in crm-api crm-web postgres garage; do echo "log_$s (25 baris):"; dc logs --no-color --tail 25 "$s" 2>&1 | mask | sed 's/^/  /'; done
+  for s in crm-api crm-web postgres; do echo "log_$s (25 baris):"; dc logs --no-color --tail 25 "$s" 2>&1 | mask | sed 's/^/  /'; done
   echo "── akhir diagnosis ──"
 }
 
@@ -77,7 +78,7 @@ result() {
   kv c_wo_login_sebelum "$V_LOGIN_B"; kv c_wo_login_sesudah "$V_LOGIN_A"; kv c_wo_api_branding_sebelum "$V_BRAND_B"; kv c_wo_api_branding_sesudah "$V_BRAND_A"
   kv wo_env_tidak_berubah "$V_WOENV"; kv wo_container_tidak_berubah "$V_WOCT"
   echo "# lain-lain"
-  kv backup_pg_dump "$V_PGDUMP"; kv backup_garage "$V_GARAGEBK"; kv pull_image "$V_PULL"; kv garage "$V_GARAGE"
+  kv backup_pg_dump "$V_PGDUMP"; kv backup_garage "$V_GARAGEBK"; kv pull_image "$V_PULL"; kv garage_bersama "$V_GARAGE"; kv crm_api_ke_maung_garage_s3 "$E_S3"; kv d_maung_garage_di_maung_edge "${G_EDGE:-n/a}"
   kv container_lama_dihapus "$LEGACY_REMOVED"; kv port_3100_lama "$PORT3100"; kv rollback "$ROLLED"; kv log "$LOG"
   for w in "${WARNS[@]:-}"; do [ -n "$w" ] && printf '  - %s\n' "$w"; done
   case "$STATUS" in
@@ -110,6 +111,16 @@ ok "jaringan maung_edge ada"
 [ -f "$WO_DIR/.env" ] || fail "folder Maung WO ($WO_DIR) tidak ada — bukan server WO?"
 ok "Maung WO ada di host ini"
 git diff --quiet HEAD -- 2>/dev/null || warn "ada perubahan lokal pada berkas terlacak di repo CRM"
+# --- Garage bersama (stack maung-garage, dikelola repo WO). Semua guard di sini terjadi SEBELUM ada yang diubah.
+# BAHAYA: compose lama (dengan service `garage`) setelah adopsi akan menyalakan Garage kedua pada volume yang sama.
+if grep -qE '^  garage:' docker-compose.yml; then fail "docker-compose.yml masih memuat service 'garage' — DITOLAK (dua Garage pada volume yang sama berbahaya). Gunakan versi repo yang menghapusnya (git pull) — tidak ada yang diubah"; fi
+ok "compose tidak memuat service garage lokal"
+OLDG=$(docker ps --filter "label=com.docker.compose.project=maung-crm" --filter "label=com.docker.compose.service=garage" --format '{{.Names}}' 2>/dev/null | head -1)
+[ -z "$OLDG" ] || fail "container Garage CRM lama ($OLDG) MASIH berjalan — jangan jalankan dua Garage pada volume yang sama. Jalankan dulu: cd ~/Maung-Wo-Inv && bash scripts/garage-platform.sh adopt-crm </dev/null"
+docker network inspect maung_storage >/dev/null 2>&1 || fail "jaringan maung_storage TIDAK ada — jalankan dulu: cd ~/Maung-Wo-Inv && bash scripts/garage-platform.sh adopt-crm </dev/null"
+G_STATE=$(docker inspect -f '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' maung-garage 2>/dev/null || echo ada-tidak)
+[ "$G_STATE" = "running/healthy" ] || fail "Garage bersama 'maung-garage' tidak berjalan & healthy (keadaan: $G_STATE) — jalankan dulu: cd ~/Maung-Wo-Inv && bash scripts/garage-platform.sh adopt-crm </dev/null"
+V_GARAGE="maung-garage $G_STATE"; ok "Garage bersama: maung-garage running/healthy; jaringan maung_storage ada"
 
 # ───────────────────────── 2. Snapshot WO (baca-saja) ─────────────────────────
 phase "Snapshot Maung WO (baca-saja)"
@@ -128,8 +139,8 @@ echo "  sebelum: /login=$V_LOGIN_B  /api/branding=$V_BRAND_B"
 phase "Konfigurasi .env CRM (backup dulu; hanya menambah/mengganti kunci tertentu)"
 if [ ! -f "$ENVF" ]; then
   FIRST_RUN=ya-env-baru; cp .env.example "$ENVF"; chmod 600 "$ENVF"
-  for k in POSTGRES_PASSWORD FILE_SIGN_SECRET GARAGE_RPC_SECRET; do setenv "$k" "$(openssl rand -hex 32)"; done
-  ok ".env dibuat dengan secret acak (3)"
+  for k in POSTGRES_PASSWORD FILE_SIGN_SECRET; do setenv "$k" "$(openssl rand -hex 32)"; done
+  ok ".env dibuat dengan secret acak (2)"
 fi
 chmod 600 "$ENVF"; cp -p "$ENVF" "$ENV_BAK"; ok "backup .env → $ENV_BAK"
 PREV_TAG=$(cat "$STATE_DIR/last_ok_tag" 2>/dev/null || true)
@@ -139,30 +150,27 @@ for k in WEB_PORT CRM_DOMAIN WO_NETWORK; do grep -q "^$k=" "$ENVF" && { delenv "
 getenv COMPOSE_FILE | grep -q 'wo-vm\|caddy' && { delenv COMPOSE_FILE; echo "  (COMPOSE_FILE usang dihapus)"; }
 TAG="$COMMIT"; setenv IMAGE_TAG "$TAG"
 echo "  image_tag=${TAG:0:12}…  tag_sebelumnya=${PREV_TAG:+${PREV_TAG:0:12}…}${PREV_TAG:-(tidak ada)}"
-for k in POSTGRES_PASSWORD FILE_SIGN_SECRET GARAGE_RPC_SECRET WO_URL IMAGE_TAG; do [ -n "$(getenv "$k")" ] || fail ".env: $k kosong"; done
+for k in POSTGRES_PASSWORD FILE_SIGN_SECRET WO_URL IMAGE_TAG; do [ -n "$(getenv "$k")" ] || fail ".env: $k kosong"; done
+{ [ -n "$(getenv S3_ACCESS_KEY)" ] && [ -n "$(getenv S3_SECRET_KEY)" ]; } || fail ".env: S3_ACCESS_KEY/S3_SECRET_KEY kosong — buat kunci di Garage bersama: cd ~/Maung-Wo-Inv && bash scripts/garage-app.sh crm --env-file ~/maung-crm/.env </dev/null (rahasia tidak dicetak)"
+[ -z "$(getenv GARAGE_RPC_SECRET)" ] || echo "  (GARAGE_RPC_SECRET lama di .env tidak dipakai lagi; dibiarkan agar rollback cutover tetap mungkin — aman dihapus setelah garage-platform.sh finalize)"
 ok "variabel wajib terisi (nilai secret tidak ditampilkan)"
 dc config -q 2>/tmp/crm-cfg.err || { sed 's/^/  /' /tmp/crm-cfg.err; fail "docker compose config tidak valid"; }
-ok "docker compose config valid"
+dc config --services 2>/dev/null | grep -qx garage && fail "compose (terinterpolasi) memuat service garage — ditolak"
+ok "docker compose config valid (services: $(dc config --services | tr '\n' ' '))"
 # container lama (compose lama): service api/web — dipertahankan sampai bukti lolos
 LEGACY_IDS=$(docker ps -a --filter "label=com.docker.compose.project=maung-crm" --format '{{.ID}} {{.Label "com.docker.compose.service"}}' | awk '$2=="api"||$2=="web"{print $1}' | tr '\n' ' ')
 [ -n "$LEGACY_IDS" ] && { FIRST_RUN="ya-migrasi-dari-CRM-uji"; echo "  container CRM uji lama ditemukan (api/web) — tidak disentuh sampai bukti lolos"; }
 ROLL_ARMED=1
 
 # ───────────────────────── 4. Backup ─────────────────────────
-phase "Backup (DB + volume Garage)"
+phase "Backup (DB CRM; Garage dicadangkan skrip WO: garage-backup.sh)"
 if [ -n "$(cid postgres)" ] && [ "$(docker inspect -f '{{.State.Status}}' "$(cid postgres)" 2>/dev/null)" = running ]; then
   F="$BK_DIR/crm-db-$TS.sql.gz"
   if dc exec -T postgres pg_dump -U crm maung_crm 2>/dev/null | gzip > "$F" && gzip -t "$F" 2>/dev/null && [ "$(stat -c%s "$F")" -gt 200 ]; then V_PGDUMP="OK ($(stat -c%s "$F") byte) $F"; ok "pg_dump → $F"; chmod 600 "$F"
   else V_PGDUMP=GAGAL; rm -f "$F"; fail "pg_dump gagal / kosong — update dibatalkan agar data aman"; fi
 else V_PGDUMP="dilewati (postgres belum berjalan: instalasi baru)"; ok "$V_PGDUMP"; fi
-GV=$(docker volume ls -q | grep -E '^maung-crm_garage_(meta|data)$' | tr '\n' ' ')
-if [ -n "$GV" ]; then
-  F="$BK_DIR/garage-$TS.tgz"
-  if docker run --rm -v maung-crm_garage_meta:/m:ro -v maung-crm_garage_data:/d:ro -v "$BK_DIR":/b alpine sh -c "tar czf /b/garage-$TS.tgz -C / m d && chown $(id -u):$(id -g) /b/garage-$TS.tgz" >/dev/null 2>&1 && [ -s "$F" ]; then
-    V_GARAGEBK="OK $F (crash-consistent, best-effort)"; ok "volume Garage di-arsip → $F"
-  else V_GARAGEBK="GAGAL (tidak fatal)"; warn "arsip volume Garage gagal (image alpine tidak bisa ditarik?) — DB tetap ter-backup"; fi
-else V_GARAGEBK="dilewati (volume belum ada)"; ok "$V_GARAGEBK"; fi
-ls -1t "$BK_DIR"/crm-db-*.sql.gz 2>/dev/null | tail -n +8 | xargs -r rm -f; ls -1t "$BK_DIR"/garage-*.tgz 2>/dev/null | tail -n +4 | xargs -r rm -f; ls -1t "$BK_DIR"/crm-env-*.bak 2>/dev/null | tail -n +8 | xargs -r rm -f
+V_GARAGEBK="dikelola skrip WO (cd ~/Maung-Wo-Inv && bash scripts/garage-backup.sh)"; ok "foto: cadangan Garage = $V_GARAGEBK"
+ls -1t "$BK_DIR"/crm-db-*.sql.gz 2>/dev/null | tail -n +8 | xargs -r rm -f; ls -1t "$BK_DIR"/crm-env-*.bak 2>/dev/null | tail -n +8 | xargs -r rm -f
 
 # ───────────────────────── 5. Tarik image ─────────────────────────
 phase "Tarik image CRM (tag = SHA commit)"
@@ -177,8 +185,8 @@ else
 fi
 
 # ───────────────────────── 6. Jalankan ─────────────────────────
-phase "Jalankan stack baru (crm-api, crm-web) — container lama tetap hidup"
-dc up -d crm-api crm-web >/tmp/crm-up.out 2>&1; URC=$?
+phase "Jalankan stack baru (crm-api, crm-web; --remove-orphans membersihkan container garage CRM lama yang sudah berhenti)"
+dc up -d --remove-orphans crm-api crm-web >/tmp/crm-up.out 2>&1; URC=$?
 sed 's/^/  /' /tmp/crm-up.out | tail -12
 [ "$URC" = 0 ] || { diag; fail "docker compose up gagal"; }
 wait_healthy crm-api "$WAIT_API" && ok "crm-api healthy" || { diag; fail "crm-api tidak healthy dalam ${WAIT_API} detik"; }
@@ -186,23 +194,13 @@ wait_healthy crm-web "$WAIT_WEB" && ok "crm-web healthy" || { diag; fail "crm-we
 V_UP=OK
 
 # ───────────────────────── 7. Garage ─────────────────────────
-phase "Garage (layout, bucket, kunci — hanya bila belum ada)"
-if [ -n "$(getenv S3_ACCESS_KEY)" ] && [ -n "$(getenv S3_SECRET_KEY)" ]; then V_GARAGE="sudah-ada (volume & kunci dipertahankan)"; ok "$V_GARAGE"
-else
-  G="dc exec -T garage /garage"; BUCKET="$(getenv S3_BUCKET)"; BUCKET="${BUCKET:-crm-photos}"
-  for _ in $(seq 1 30); do $G status >/dev/null 2>&1 && break; sleep 2; done
-  NODE=$($G status 2>/dev/null | awk '/^[0-9a-f]{16}/{print $1; exit}'); [ -n "$NODE" ] || fail "ID node Garage tidak terbaca"
-  $G layout show 2>/dev/null | grep -q "$NODE" || { $G layout assign -z dc1 -c 10G "$NODE" >/dev/null && $G layout apply --version 1 >/dev/null || fail "layout Garage gagal"; }
-  $G bucket create "$BUCKET" >/dev/null 2>&1 || true
-  OUT=$($G key create crm-key 2>&1 || $G key info crm-key --show-secret 2>&1 || true)
-  AK=$(printf '%s\n' "$OUT" | awk '/Key ID:/{print $3; exit}'); SK=$(printf '%s\n' "$OUT" | awk '/Secret key:/{print $3; exit}')
-  [ -n "$AK" ] && [ -n "$SK" ] || { printf '%s\n' "$OUT" | sed 's/\(Secret key:\).*/\1 ***/'; fail "kunci Garage tidak terbaca"; }
-  $G bucket allow --read --write --owner "$BUCKET" --key crm-key >/dev/null || fail "izin bucket Garage gagal"
-  setenv S3_ACCESS_KEY "$AK"; setenv S3_SECRET_KEY "$SK"; V_GARAGE="diinisialisasi (kunci disimpan ke .env, tidak ditampilkan)"; ok "$V_GARAGE"
-  dc up -d crm-api >/dev/null 2>&1; wait_healthy crm-api "$WAIT_BACK" || fail "crm-api tidak sehat setelah kunci S3 diisi"
-fi
+phase "Penyimpanan objek (Garage bersama)"
+[ "$(docker inspect -f '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' maung-garage 2>/dev/null)" = "running/healthy" ] && ok "maung-garage masih running/healthy" || fail "maung-garage tidak sehat selama update — jalankan: cd ~/Maung-Wo-Inv && bash scripts/garage-platform.sh status </dev/null"
+r=$(dc exec -T crm-api node -e "fetch('http://maung-garage:3900/').then(r=>{console.log('HTTP '+r.status);process.exit(0)}).catch(e=>{console.log('ERR');process.exit(1)})" 2>/dev/null | tr -d '\r\n'); E_S3="${r:-ERR}"
+case "$E_S3" in HTTP*) ok "crm-api → http://maung-garage:3900 menjawab ($E_S3)" ;; *) fail "crm-api tidak menjangkau http://maung-garage:3900 ($E_S3) — crm-api harus di jaringan maung_storage" ;; esac
 dc exec -T crm-api node -e "import('./dist/storage.js').then(async m=>{const s=m.storage();await s.put('_selftest/x.txt',Buffer.from('ok'),'text/plain');process.exit((await s.get('_selftest/x.txt')).toString()==='ok'?0:1)}).catch(e=>{console.error(e.message);process.exit(1)})" >/dev/null 2>&1 \
-  && ok "uji tulis/baca objek ke Garage dari crm-api berhasil" || fail "uji tulis/baca Garage dari crm-api gagal"
+  && ok "uji tulis/baca objek ke Garage bersama dari crm-api berhasil (bucket crm-photos, kunci crm-key)" || fail "uji tulis/baca Garage dari crm-api gagal (kunci S3 salah / bucket tidak ada?)"
+echo "  (setelah adopsi: lanjutkan di folder WO → bash scripts/garage-platform.sh finalize </dev/null)"
 
 # ───────────────────────── 8. Bukti ─────────────────────────
 phase "Bukti terhadap sistem asli (tanpa token)"
@@ -219,17 +217,24 @@ E_PROBE_API=$(probe http://crm-api:4000/crm/api/health); E_PROBE_WEB=$(probe htt
 [ "$E_PROBE_API" = 200 ] && ok "(d) dari jaringan maung_edge: http://crm-api:4000/crm/api/health = 200" || fail "(d) crm-api tidak terjangkau di maung_edge (hasil '$E_PROBE_API')"
 case "$E_PROBE_WEB" in 2??|3??|4??) ok "(d) dari jaringan maung_edge: http://crm-web:3000/crm = $E_PROBE_WEB" ;; *) fail "(d) crm-web tidak terjangkau di maung_edge (hasil '$E_PROBE_WEB')" ;; esac
 nets_ok=1; ports_ok=1
+netsof() { docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$1" 2>/dev/null; }
+c=$(cid crm-api); nn=$(netsof "$c"); echo "  crm-api: jaringan=[ ${nn}]"
+echo "$nn" | grep -qw maung_edge && echo "$nn" | grep -qw maung_storage || nets_ok=0
+c=$(cid crm-web); nn=$(netsof "$c"); echo "  crm-web: jaringan=[ ${nn}]"
+echo "$nn" | grep -qw maung_edge && ! echo "$nn" | grep -qw maung_storage || nets_ok=0
+c=$(cid postgres); nn=$(netsof "$c"); echo "  postgres: jaringan=[ ${nn}]"
+echo "$nn" | grep -qwE 'maung_edge|maung_storage' && nets_ok=0
+nn=$(netsof maung-garage); echo "  maung-garage: jaringan=[ ${nn}]"
+echo "$nn" | grep -qw maung_storage || nets_ok=0
+if echo "$nn" | grep -qw maung_edge; then nets_ok=0; G_EDGE="TIDAK-BOLEH (ada di maung_edge)"; else G_EDGE=ok; fi
 for s in crm-api crm-web; do
-  c=$(cid "$s"); nn=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$c")
-  echo "$nn" | grep -qw maung_edge || nets_ok=0
-  pp=$(docker inspect -f '{{range $p,$b := .NetworkSettings.Ports}}{{if $b}}{{$p}}→host {{end}}{{end}}' "$c" | tr -d ' ')
+  c=$(cid "$s"); pp=$(docker inspect -f '{{range $p,$b := .NetworkSettings.Ports}}{{if $b}}{{$p}}→host {{end}}{{end}}' "$c" | tr -d ' ')
   [ -z "$pp" ] || ports_ok=0
-  echo "  $s: jaringan=[ ${nn}] port_host=[${pp:-tidak ada}]"
+  echo "  $s: port_host=[${pp:-tidak ada}]"
 done
-for s in postgres garage; do c=$(cid "$s"); docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$c" | grep -qw maung_edge && { nets_ok=0; echo "  ✗ $s ada di maung_edge"; }; done
-[ $nets_ok = 1 ] && E_NET="crm-web+crm-api di maung_edge; postgres/garage privat" || E_NET=SALAH
+[ $nets_ok = 1 ] && E_NET="crm-api: edge+storage; crm-web: edge saja; postgres privat; maung-garage tidak di maung_edge" || E_NET=SALAH
 [ $ports_ok = 1 ] && E_PORTS="tidak ada" || E_PORTS="ADA"
-[ $nets_ok = 1 ] && ok "(d) crm-web & crm-api di maung_edge; postgres/garage tidak" || fail "(d) keanggotaan jaringan salah"
+[ $nets_ok = 1 ] && ok "(d) jaringan benar: crm-api di maung_edge+maung_storage, crm-web hanya maung_edge, postgres privat, maung-garage TIDAK di maung_edge" || fail "(d) keanggotaan jaringan salah (lihat daftar di atas)"
 [ $ports_ok = 1 ] && ok "(d) tidak ada port CRM terbuka di host" || fail "(d) ada port CRM terbuka di host"
 # (b) via Caddy WO — PENDING bila crm.caddy belum dipasang (urutan go-live: deploy CRM dulu, lalu crm.caddy)
 C_HEALTH_CODE=$(http "$WO_URL/crm/api/health"); C_CRM_CODE=$(http "$WO_URL/crm")

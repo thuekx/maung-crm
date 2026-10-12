@@ -18,7 +18,18 @@ test("jaringan maung_edge eksternal; hanya crm-web & crm-api yang bergabung", ()
   assert.deepEqual(c.networks.edge, { name: "maung_edge", external: true });
   const onEdge = Object.keys(svc).filter((n) => nets(svc[n]).includes("edge")).sort();
   assert.deepEqual(onEdge, ["crm-api", "crm-web"]);
-  for (const n of ["postgres", "garage"]) assert.ok(!nets(svc[n]).includes("edge"), `${n} harus privat`);
+  assert.ok(!nets(svc.postgres).includes("edge"), "postgres harus privat");
+});
+
+test("Garage = stack bersama maung-garage: CRM tidak menjalankan Garage; hanya crm-api di maung_storage", () => {
+  assert.equal(svc.garage, undefined, "service garage harus dihapus dari compose CRM (dua Garage pada satu volume berbahaya)");
+  assert.ok(!/garage_(meta|data)|dxflrs\/garage|GARAGE_RPC_SECRET/.test(raw), "tidak boleh ada definisi volume/image/rahasia Garage di compose CRM");
+  assert.deepEqual(c.networks.storage, { name: "maung_storage", external: true });
+  const onStorage = Object.keys(svc).filter((n) => nets(svc[n]).includes("storage")).sort();
+  assert.deepEqual(onStorage, ["crm-api"], "hanya crm-api yang boleh di maung_storage");
+  assert.equal(svc["crm-api"].environment.S3_ENDPOINT, "http://maung-garage:3900");
+  assert.ok(!("garage" in (svc["crm-api"].depends_on ?? {})), "crm-api tidak boleh bergantung pada service garage lokal");
+  assert.ok(!c.volumes?.garage_meta && !c.volumes?.garage_data, "volume garage tidak boleh didefinisikan (dimiliki stack Garage bersama)");
 });
 
 test("tidak menempel ke jaringan WO dan tidak ada proxy/Caddy milik CRM", () => {

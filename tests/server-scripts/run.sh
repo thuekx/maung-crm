@@ -4,7 +4,7 @@
 # Bila dijalankan sebagai root, skrip diuji sebagai user `nobody` (karena skrip menolak root); selain itu langsung.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"; REPO="$(cd "$HERE/../.." && pwd)"
-S=$(mktemp -d /tmp/crm-script-tests.XXXXXX); chmod 755 $S; trap 'rm -rf $S' EXIT
+S=$(mktemp -d /tmp/crm-script-tests.XXXXXX); chmod 755 $S; [ "${KEEP:-0}" = 1 ] || trap 'rm -rf $S' EXIT
 cp -r "$HERE/bin" "$S/bin"; cp -r "$HERE/bin-ssh" "$S/bin-ssh"; chmod -R a+rX $S
 own() { [ "$(id -u)" = 0 ] && chown -R nobody:nogroup "$@"; return 0; }
 as_user() { if [ "$(id -u)" = 0 ]; then su -s /bin/bash nobody -c "$1"; else bash -c "$1"; fi; }
@@ -17,7 +17,7 @@ PASS=0; FAILC=0
 chk() { if eval "$2"; then echo "   ✓ $1"; PASS=$((PASS+1)); else echo "   ✗ $1   [$2]"; FAILC=$((FAILC+1)); fi; }
 setup() { # setup <nama>
   H=$S/home-$1; STUB=$S/stub-$1; rm -rf $H $STUB; mkdir -p $H $STUB $H/Maung-Wo-Inv
-  git clone -q $S/maung-crm.git $H/maung-crm; cp -r "$REPO/scripts/." "$H/maung-crm/scripts/"  # uji berkas kerja saat ini (di CI = isi commit)
+  git clone -q $S/maung-crm.git $H/maung-crm; cp -r "$REPO/scripts/." "$H/maung-crm/scripts/"; cp "$REPO/docker-compose.yml" "$REPO/.env.example" "$H/maung-crm/"; cp -r "$REPO/deploy/." "$H/maung-crm/deploy/"  # uji berkas kerja saat ini (di CI = isi commit)
   git -C $H/Maung-Wo-Inv init -q; printf 'WEB_DOMAIN=maung.liv.net.id\nJWT_SECRET=RAHASIA_WO\n' > $H/Maung-Wo-Inv/.env
   printf 'wo-api-1 aaa running\nwo-web-1 bbb running\nwo-caddy-1 ccc running\n' > $STUB/wo_ids
   cat > $H/maung-crm/.env <<EOT
@@ -58,9 +58,12 @@ chk "NEXT=PASANG crm.caddy" "has s1 'NEXT=PASANG_JALUR_CRM_DI_WO' && has s1 'scr
 chk "IMAGE_TAG di .env = SHA HEAD" "grep -q '^IMAGE_TAG=$HEAD' $S/home-s1/maung-crm/.env"
 chk "kunci usang WEB_PORT/CRM_DOMAIN dihapus; secret lama dipertahankan" "! grep -q WEB_PORT $S/home-s1/maung-crm/.env && grep -q 'pgpass_asli_123' $S/home-s1/maung-crm/.env && grep -q 'skLama_rahasia' $S/home-s1/maung-crm/.env"
 chk "last_ok_tag = HEAD" "[ \"\$(cat $S/home-s1/maung-crm-logs/state/last_ok_tag)\" = $HEAD ]"
-chk "backup pg_dump + env + garage ada" "ls $S/home-s1/maung-crm-logs/backup/ | grep -q crm-db && ls $S/home-s1/maung-crm-logs/backup/ | grep -q crm-env && ls $S/home-s1/maung-crm-logs/backup/ | grep -q garage"
+chk "backup pg_dump + env ada; TIDAK ada arsip Garage (dikelola skrip WO)" "ls $S/home-s1/maung-crm-logs/backup/ | grep -q crm-db && ls $S/home-s1/maung-crm-logs/backup/ | grep -q crm-env && ! ls $S/home-s1/maung-crm-logs/backup/ | grep -q garage && has s1 'garage-backup.sh'"
+chk "Garage bersama: guard lolos, crm-api→maung-garage:3900, jaringan benar, maung-garage tidak di edge" "has s1 'garage_bersama=maung-garage running/healthy' && has s1 'crm_api_ke_maung_garage_s3=HTTP 403' && has s1 'd_maung_garage_di_maung_edge=ok' && has s1 'crm-api: edge+storage; crm-web: edge saja'"
+chk "up memakai --remove-orphans; CRM tidak mengelola Garage (tanpa exec garage/layout/key/volume/alpine)" "calls s1 'compose up -d --remove-orphans crm-api crm-web' && ! calls s1 'exec -T garage' && ! calls s1 'layout' && ! calls s1 'key create' && ! calls s1 'alpine' && ! calls s1 'volume ls'"
+chk "GARAGE_RPC_SECRET lama dibiarkan (rollback cutover) tetapi tidak dicetak" "grep -q 'rpcsecret_asli' $S/home-s1/maung-crm/.env && has s1 'tidak dipakai lagi'"
 chk "secret TIDAK tercetak di log" "! grep -qE 'pgpass_asli_123|skLama_rahasia|signsecret_asli|rpcsecret_asli|SUPERSECRET|RAHASIA_WO' $S/out-s1.txt"
-chk "tidak ada sudo; compose up hanya crm-api crm-web" "! calls s1 'sudo' && calls s1 'compose up -d crm-api crm-web'"
+chk "tidak ada sudo" "! calls s1 'sudo'"
 
 echo "### S1b Caddy sudah dipasang"; setup s1b; touch $S/stub-s1b/x; printf 200 > $S/stub-s1b/caddy_health; printf 200 > $S/stub-s1b/caddy_crm; own $S/stub-s1b; run s1b
 chk "PASS + NEXT=UJI_MANUAL" "has s1b 'status=PASS' && has s1b 'NEXT=UJI_MANUAL_PEMILIK' && has s1b 'b_https_crm_api_health=PASS' && has s1b 'b_https_crm=PASS'"
@@ -104,6 +107,30 @@ echo "### S13 pg_dump kosong"; setup s13; touch $S/stub-s13/pgdump_empty; own $S
 chk "dibatalkan sebelum mengubah apa pun" "has s13 'pg_dump gagal' && ! calls s13 'compose pull' && cmp -s $S/home-s13/maung-crm/.env $S/env-asli-s13"
 echo "### S14 up gagal"; setup s14; touch $S/stub-s14/up_fail; own $S/stub-s14; run s14
 chk "FAIL + diagnosis + rollback" "has s14 'docker compose up gagal' && has s14 'DIAGNOSIS' && calls s14 'compose rm -sf crm-web crm-api'"
+echo "### G* Garage bersama (pemisahan dari CRM) — semua guard terjadi SEBELUM ada perubahan"
+gset() { setup $1; for f in "${@:2}"; do touch $S/stub-$1/$f; done; own $S/stub-$1 $S/home-$1; }
+gnochange() { cmp -s $S/home-$1/maung-crm/.env $S/env-asli-$1 && ! calls $1 'compose pull' && ! calls $1 'compose up' && ! calls $1 'pg_dump'; }
+gset g1 no_garage; run g1
+chk "G1 maung-garage tidak ada → berhenti + perintah adopt-crm; tidak ada yang diubah" "has g1 'status=FAIL' && has g1 'garage-platform.sh adopt-crm' && gnochange g1"
+gset g2 garage_unhealthy; run g2
+chk "G2 maung-garage tidak healthy → ditolak" "has g2 'tidak berjalan & healthy' && has g2 'running/unhealthy' && gnochange g2"
+gset g3 no_storage; run g3
+chk "G3 jaringan maung_storage tidak ada → ditolak + adopt-crm" "has g3 'maung_storage TIDAK ada' && has g3 'adopt-crm' && gnochange g3"
+setup g4; sed -i 's/^services:/services:\n  garage:\n    image: x/' $S/home-g4/maung-crm/docker-compose.yml; own $S/home-g4 $S/stub-g4; run g4
+chk "G4 compose masih memuat service garage → DITOLAK (bahaya dua Garage)" "has g4 \"masih memuat service 'garage'\" && has g4 'DITOLAK' && gnochange g4"
+gset g5 old_garage_running; run g5
+chk "G5 container Garage CRM lama masih berjalan → ditolak" "has g5 'MASIH berjalan' && has g5 'adopt-crm' && gnochange g5"
+setup g6; sed -i 's/^S3_ACCESS_KEY=.*/S3_ACCESS_KEY=/' $S/home-g6/maung-crm/.env; cp $S/home-g6/maung-crm/.env $S/env-asli-g6; own $S/home-g6 $S/stub-g6; run g6
+chk "G6 kunci S3 kosong → petunjuk garage-app.sh; .env dikembalikan; tanpa up" "has g6 'garage-app.sh crm --env-file' && cmp -s $S/home-g6/maung-crm/.env $S/env-asli-g6 && ! calls g6 'compose up'"
+gset g7 s3_unreachable; run g7
+chk "G7 crm-api tak menjangkau maung-garage:3900 → FAIL + rollback" "has g7 'status=FAIL' && has g7 'tidak menjangkau http://maung-garage:3900' && calls g7 'compose rm -sf crm-web crm-api'"
+gset g8 crmapi_no_storage; run g8
+chk "G8 crm-api tidak di maung_storage → FAIL (d)" "has g8 'status=FAIL' && has g8 'keanggotaan jaringan salah'"
+gset g9 garage_on_edge; run g9
+chk "G9 maung-garage ada di maung_edge → FAIL (d) + ditandai" "has g9 'status=FAIL' && has g9 'd_maung_garage_di_maung_edge=TIDAK-BOLEH'"
+gset g10 crmweb_on_storage; run g10
+chk "G10 crm-web ikut maung_storage → FAIL (d)" "has g10 'status=FAIL' && has g10 'keanggotaan jaringan salah'"
+
 echo "### C* diagnosa jalur /crm (scripts/check-route.sh, baca-saja)"
 runc() { n=$1; shift; as_user "cd $S/home-$n/maung-crm && HOME=$S/home-$n STUB=$S/stub-$n PATH=$S/bin:\$PATH EXPECT_HOST=\${EXPECT_HOST_OVERRIDE:-$(hostname)} $* bash scripts/check-route.sh </dev/null" > $S/out-$n.txt 2>&1; echo $? > $S/rc-$n; }
 cprep() { setup $1; touch $S/stub-$1/crm_up; mkdir -p $S/home-$1/Maung-Wo-Inv/proxy/apps; own $S/stub-$1 $S/home-$1; }

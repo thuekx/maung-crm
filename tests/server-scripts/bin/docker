@@ -6,7 +6,11 @@ cmd="$1"; shift
 case "$cmd" in
   info) exit 0 ;;
   --version) echo "Docker version 29.0.0" ;;
-  network) f no_edge && exit 1; echo '[{"Name":"maung_edge"}]' ;;
+  network)
+    case "$*" in
+      *maung_storage*) f no_storage && exit 1; echo '[{"Name":"maung_storage"}]' ;;
+      *) f no_edge && exit 1; echo '[{"Name":"maung_edge"}]' ;;
+    esac ;;
   volume) echo maung-crm_garage_meta; echo maung-crm_garage_data ;;
   image) echo "ghcr.io/thuekx/maung-crm-web@sha256:abcdef0123456789abcdef" ;;
   run)
@@ -26,6 +30,7 @@ case "$cmd" in
   ps)
     a="$*"
     if echo "$a" | grep -q 'service=caddy'; then echo caddyid
+    elif echo "$a" | grep -q 'service=garage'; then f old_garage_running && echo maung-crm-garage-1
     elif echo "$a" | grep -q 'label=com.docker.compose.project=maung-wo-inv'; then cat "$STUB/wo_ids"
     elif echo "$a" | grep -q 'label=com.docker.compose.project=maung-crm'; then
       f legacy_gone || { echo "legacy_api_id api"; echo "legacy_web_id web"; }
@@ -35,17 +40,29 @@ case "$cmd" in
   start) : ;;
   inspect)
     a="$*"; id="${@: -1}"
+    if [ "$id" = maung-garage ]; then   # Garage bersama (stack maung-garage)
+      f no_garage && exit 1
+      case "$a" in
+        *Networks*) echo "maung_storage maung-crm_default $(f garage_on_edge && echo maung_edge)" ;;
+        *State.Status*) f garage_unhealthy && echo "running/unhealthy" || echo "running/healthy" ;;
+      esac; exit 0
+    fi
     case "$a" in
       *State.Health*) f "unhealthy_$id" && echo unhealthy || echo healthy ;;
       *State.Status*) echo running ;;
-      *Networks*) case "$id" in crmapi_id|crmweb_id) echo "maung-crm_default maung_edge " ;; *) echo "maung-crm_default " ;; esac ;;
+      *Networks*) case "$id" in
+          crmapi_id) f crmapi_no_storage && echo "maung-crm_default maung_edge " || echo "maung-crm_default maung_edge maung_storage " ;;
+          crmweb_id) f crmweb_on_storage && echo "maung-crm_default maung_edge maung_storage " || echo "maung-crm_default maung_edge " ;;
+          *) echo "maung-crm_default " ;;
+        esac ;;
       *NetworkSettings.Ports*) f ports_open && case "$id" in crmweb_id) echo "3000/tcp→host" ;; esac ;;
     esac ;;
   compose)
     sub="$1"; shift
     case "$sub" in
       version) echo "v2.30.0" ;;
-      config) if [ "$1" = "--images" ]; then echo "ghcr.io/thuekx/maung-crm-api:$(grep "^IMAGE_TAG=" .env | cut -d= -f2-)"; echo "ghcr.io/thuekx/maung-crm-web:$(grep "^IMAGE_TAG=" .env | cut -d= -f2-)"; else f cfg_bad && { echo "config invalid" >&2; exit 1; }; grep -q '^IMAGE_TAG=.' .env || { echo "required variable IMAGE_TAG missing" >&2; exit 1; }; fi ;;
+      config) if [ "$1" = "--services" ]; then echo postgres; f config_has_garage && echo garage; echo crm-api; echo crm-web
+              elif [ "$1" = "--images" ]; then echo "ghcr.io/thuekx/maung-crm-api:$(grep "^IMAGE_TAG=" .env | cut -d= -f2-)"; echo "ghcr.io/thuekx/maung-crm-web:$(grep "^IMAGE_TAG=" .env | cut -d= -f2-)"; else f cfg_bad && { echo "config invalid" >&2; exit 1; }; grep -q '^IMAGE_TAG=.' .env || { echo "required variable IMAGE_TAG missing" >&2; exit 1; }; fi ;;
       pull) f pull_denied && { echo "Error response from daemon: denied" >&2; exit 1; }; f pull_notfound && { echo "manifest unknown" >&2; exit 1; }; echo "pulled" ;;
       up) f up_fail && { echo "up failed" >&2; exit 1; }; touch "$STUB/crm_up"; f mutate_wo_env && echo "X=1" >> "$HOME/Maung-Wo-Inv/.env"; f mutate_wo_ct && echo "wo-api-1 zzz exited" >> "$STUB/wo_ids"; echo "started" ;;
       rm) rm -f "$STUB/crm_up" ;;
@@ -62,6 +79,7 @@ case "$cmd" in
           garage) case "$a" in *"status"*) echo "ID Hostname"; echo "0123456789abcdef host" ;; *"layout show"*) echo "0123456789abcdef" ;; *"key create"*) echo "Key ID: GKabc123"; echo "Secret key: s3cr3tvalue" ;; esac ;;
           crm-api)
             case "$a" in
+              *"maung-garage:3900"*) f s3_unreachable && echo ERR || echo "HTTP 403" ;;
               *"/api/auth/me"*) cat "$STUB/me_status" 2>/dev/null || echo 401 ;;
               *"crm/api/health"*) echo 200 ;;
               *"crm/api/me"*) echo 401 ;;

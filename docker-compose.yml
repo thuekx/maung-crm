@@ -2,7 +2,11 @@ name: maung-crm
 
 # CRM di jalur /crm pada domain Maung WO (satu domain, satu login). Caddy milik WO; CRM TIDAK membuka port host
 # dan tidak menjalankan proxy. Hanya crm-web & crm-api bergabung ke jaringan eksternal `maung_edge` (dibuat oleh
-# deploy WO) dengan nama service unik; postgres & garage hanya di jaringan privat CRM.
+# deploy WO) dengan nama service unik; postgres hanya di jaringan privat CRM.
+# Penyimpanan foto = Garage BERSAMA milik stack tersendiri `maung-garage` (repo WO: platform/garage; skrip
+# scripts/garage-platform.sh). Hanya crm-api bergabung ke jaringan eksternal `maung_storage` untuk menjangkaunya
+# (http://maung-garage:3900, path-style). CRM TIDAK lagi menjalankan Garage sendiri. Bucket `crm-photos` & kunci
+# `crm-key` (S3_*) tetap. JANGAN `docker compose down -v` di sini sebelum volume Garage lama diadopsi/difinalisasi.
 # Konfigurasi lewat .env (lihat .env.example). IMAGE_TAG WAJIB (SHA commit; tidak ada `latest` bawaan).
 #
 # Bila container tidak bisa menjangkau WO_URL (hairpin), tambahkan pada crm-api:
@@ -23,17 +27,6 @@ services:
       interval: 5s
       retries: 10
 
-  garage:
-    image: dxflrs/garage:v1.0.1
-    restart: unless-stopped
-    environment:
-      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?isi GARAGE_RPC_SECRET (openssl rand -hex 32)}
-    volumes:
-      - ./deploy/garage.toml:/etc/garage.toml:ro
-      - garage_meta:/var/lib/garage/meta
-      - garage_data:/var/lib/garage/data
-    # S3 API (3900) hanya di jaringan privat CRM.
-
   crm-api:
     image: ghcr.io/thuekx/maung-crm-api:${IMAGE_TAG:?isi IMAGE_TAG (SHA commit image)}
     restart: unless-stopped
@@ -45,15 +38,14 @@ services:
       WO_URL: ${WO_URL:?isi WO_URL (alamat publik Maung WO, mis. https://maung.liv.net.id)}
       FILE_SIGN_SECRET: ${FILE_SIGN_SECRET:?isi FILE_SIGN_SECRET}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-s3}
-      S3_ENDPOINT: http://garage:3900
+      S3_ENDPOINT: http://maung-garage:3900
       S3_REGION: garage
       S3_BUCKET: ${S3_BUCKET:-crm-photos}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-}
     depends_on:
       postgres: { condition: service_healthy }
-      garage: { condition: service_started }
-    networks: [default, edge]
+    networks: [default, edge, storage]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/crm/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 10s
@@ -79,8 +71,9 @@ networks:
   edge:
     name: maung_edge
     external: true
+  storage:
+    name: maung_storage
+    external: true # dibuat oleh scripts/garage-platform.sh (repo WO); bukan maung_edge
 
 volumes:
   pgdata:
-  garage_meta:
-  garage_data:
