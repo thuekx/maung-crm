@@ -1,9 +1,66 @@
+@import '@fontsource-variable/inter/wght.css';
+@import '@fontsource-variable/playfair-display/wght.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-body { @apply bg-gray-50 text-gray-900; }
-.btn { @apply rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50; }
-.btn-ghost { @apply rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 disabled:opacity-50; }
-.inp { @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900; }
-.card { @apply rounded-xl border border-gray-200 bg-white p-4; }
-.lbl { @apply mb-1 block text-xs font-medium text-gray-600; }
+
+/* ── Token brand: bawaan panduan MAUNG by LIV (sama dengan Maung WO). Nilai sebenarnya ditimpa dari Admin WO (lib/brand.ts + public/theme-init.js) ── */
+:root {
+  --brand-50: 243 244 245; --brand-100: 226 228 231; --brand-200: 194 199 206; --brand-300: 153 161 173; --brand-400: 109 121 137;
+  --brand-500: 70 85 106; --brand-600: 40 58 83; --brand-700: 26 44 71; --brand-800: 16 35 63; --brand-900: 11 31 59; --brand-950: 7 20 38;
+  --accent-50: 254 247 235; --accent-100: 253 239 216; --accent-200: 252 222 172; --accent-300: 250 202 121; --accent-400: 247 179 65;
+  --accent-500: 245 158 11; --accent-600: 216 139 10; --accent-700: 176 114 8; --accent-800: 142 92 6; --accent-900: 113 73 5; --accent-950: 78 51 4;
+  --brand-hex: #0B1F3B; --accent-hex: #F59E0B;
+}
+
+@layer base {
+  html { font-family: 'Inter Variable', Inter, system-ui, sans-serif; font-feature-settings: 'cv11', 'ss01'; }
+  .dark *, .dark ::before, .dark ::after { border-color: #1e3555; }
+  h1, h2 { letter-spacing: -0.01em; }
+}
+
+body { @apply bg-slate-50 text-slate-800 antialiased; }
+.grid > * { min-width: 0; }
+
+/* ── Komponen: sama dengan Maung WO (emas = aksi utama, navy = sekunder, kartu membulat) ── */
+@layer components {
+  .input { @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-accent-500 focus:ring-2 focus:ring-accent-200; }
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent-500 px-4 py-2 text-sm font-semibold text-brand-900 shadow-sm transition hover:bg-accent-400 active:bg-accent-600 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:opacity-50; }
+  .btn-ghost { @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50; }
+  .btn-danger { @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50; }
+  .btn-link { @apply inline-flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline; }
+  .card { @apply rounded-xl border border-slate-200 bg-white p-4 shadow-card; }
+  .subheader { @apply text-[11px] font-semibold uppercase tracking-wider text-slate-500; }
+  .lbl { @apply mb-1 block text-xs font-medium text-slate-600; }
+  .menu-item { @apply relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-brand-900; }
+  .menu-item-active { @apply bg-accent-50 text-brand-900 hover:bg-accent-50; }
+}
+
+/* ── Tema gelap (navy), dipetakan seperti Maung WO ── */
+.dark body { background-color: #08172c; color: #e2e8f0; }
+.dark .bg-white, .dark .card, .dark .input, .dark .btn-ghost { background-color: #0e2340; }
+.dark .bg-slate-50, .dark .hover\:bg-slate-50:hover { background-color: #0b1c35; }
+.dark .bg-slate-100, .dark .hover\:bg-slate-100:hover { background-color: #15294a; }
+.dark .text-slate-800, .dark .text-slate-700 { color: #e6edf7; }
+.dark .text-slate-600 { color: #c3cfe0; }
+.dark .text-slate-500 { color: #94a3b8; }
+.dark .text-slate-400 { color: #7b8aa3; }
+.dark .card, .dark .input, .dark .btn-ghost, .dark .border-slate-200, .dark .border-slate-300, .dark .border-slate-100 { border-color: #1e3555; }
+.dark .btn-ghost, .dark .input { color: #e6edf7; }
+.dark .input::placeholder { color: #64748b; }
+.dark .shadow-card, .dark .shadow-sm { box-shadow: 0 1px 2px rgb(0 0 0 / .45); }
+.dark .menu-item { color: #c3cfe0; } .dark .menu-item:hover { background-color: rgb(255 255 255 / .06); color: #fff; }
+.dark .menu-item-active, .dark .menu-item-active:hover { background-color: rgb(245 158 11 / .14); color: #fff; }
+.dark .text-brand-900, .dark .text-brand-800, .dark .text-brand-700, .dark .text-brand-600 { color: #9db8e6; }
+.dark .btn { color: #0B1F3B; }
+.dark [class*="bg-accent-"].text-brand-900 { color: #0B1F3B; }
+.dark .btn-secondary { background-color: #1d3d6b; } .dark .btn-secondary:hover { background-color: #25508c; }
+.dark .bg-brand-50, .dark .hover\:bg-brand-50:hover { background-color: rgb(157 184 230 / .12); }
+.dark .bg-green-100, .dark .bg-green-50 { background-color: rgb(34 197 94 / .18); } .dark .text-green-700 { color: #86efac; }
+.dark .bg-amber-100 { background-color: rgb(245 158 11 / .20); } .dark .text-amber-800 { color: #fcd34d; }
+.dark .bg-red-100, .dark .bg-red-50 { background-color: rgb(239 68 68 / .18); } .dark .text-red-700, .dark .text-red-600 { color: #fca5a5; }
+.dark .\!text-red-600 { color: #fca5a5 !important; } .dark .\!border-red-300 { border-color: rgb(239 68 68 / .5) !important; }
+.dark .border-red-300 { border-color: rgb(239 68 68 / .5); }
+.dark .text-accent-700, .dark .text-accent-600 { color: #fbbf24; }
+.dark dd, .dark td, .dark th, .dark li, .dark label { color: inherit; }

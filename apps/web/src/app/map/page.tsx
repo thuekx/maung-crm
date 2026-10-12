@@ -39,7 +39,7 @@ export default function MapView() {
   return (
     <div className="space-y-2">
       <h1 className="text-lg font-semibold">Map View</h1>
-      <p className="text-xs text-gray-600">{info} · hijau = GPS Verified, oranye = Unverified</p>
+      <p className="text-xs text-slate-500">{info} · hijau = GPS Verified, oranye = Unverified</p>
       <div ref={el} className="h-[70vh] w-full rounded-xl" />
     </div>
   );

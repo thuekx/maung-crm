@@ -8,8 +8,8 @@ const SRC: Record<string, string> = { LIVE: "Live GPS", EXIF: "EXIF", UPLOAD: "U
 
 function Badge({ status, source }: { status: string; source?: string | null }) {
   return status === "VERIFIED"
-    ? <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">GPS Verified{source ? ` · ${SRC[source]}` : ""}</span>
-    : <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">Location Unverified{source ? ` · ${SRC[source]}` : ""}</span>;
+    ? <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">GPS Verified{source ? ` · ${SRC[source]}` : ""}</span>
+    : <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700">Location Unverified{source ? ` · ${SRC[source]}` : ""}</span>;
 }
 
 export default function ReportDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -69,7 +69,7 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
     <div className="space-y-3">
       <div className="card space-y-1 text-sm">
         <div className="flex justify-between"><b>{ACTIVITY_TYPES[r.activityType]}{r.area ? ` · ${r.area}` : ""}</b><span>{r.status}</span></div>
-        <div className="text-gray-600">{fmtDate(r.activityAt)} · PIC: {r.pics.map((p: any) => p.name).join(", ")}</div>
+        <div className="text-slate-500">{fmtDate(r.activityAt)} · PIC: {r.pics.map((p: any) => p.name).join(", ")}</div>
         {r.counterpart && <div>Counterpart: {r.counterpart}</div>}
         {r.accountName && <div>Account: {r.accountName}</div>}
         {r.summary && <p className="whitespace-pre-wrap">{r.summary}</p>}
@@ -87,7 +87,7 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
             <Badge status={r.checkin.locationStatus} source={r.checkin.source} />
             <div>{r.checkin.lat.toFixed(6)}, {r.checkin.lng.toFixed(6)}{r.checkin.accuracy != null ? ` · ±${Math.round(r.checkin.accuracy)} m` : ""}</div>
           </div>
-        ) : <div className="text-gray-600">Belum check-in.</div>}
+        ) : <div className="text-slate-500">Belum check-in.</div>}
         {!locked && <button className="btn-ghost" disabled={busy} onClick={checkin}>{r.checkin ? "Check-in ulang (tercatat di audit)" : "Check-in GPS"}</button>}
       </div>
 
@@ -101,7 +101,7 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
             <input ref={galRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) upload(f, false); }} />
           </div>
         )}
-        <p className="text-xs text-gray-600">Foto galeri tidak dianggap diambil di lokasi (Location Unverified).</p>
+        <p className="text-xs text-slate-500">Foto galeri tidak dianggap diambil di lokasi (Location Unverified).</p>
         <div className="grid grid-cols-2 gap-2">
           {r.photos.map((p: any) => (
             <div key={p.id} className="space-y-1 text-xs">
@@ -126,11 +126,11 @@ export default function ReportDetail({ params }: { params: Promise<{ id: string 
           </label>
         ))}
         <div className="grid gap-2 sm:grid-cols-4">
-          <input className="inp sm:col-span-2" placeholder="Tindak lanjut" value={task.title} onChange={(e) => setTask({ ...task, title: e.target.value })} />
-          <select className="inp" value={task.picUserId} onChange={(e) => setTask({ ...task, picUserId: e.target.value })}>
+          <input className="input sm:col-span-2" placeholder="Tindak lanjut" value={task.title} onChange={(e) => setTask({ ...task, title: e.target.value })} />
+          <select className="input" value={task.picUserId} onChange={(e) => setTask({ ...task, picUserId: e.target.value })}>
             <option value="">PIC…</option>{pics.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <input className="inp" type="date" value={task.dueDate} onChange={(e) => setTask({ ...task, dueDate: e.target.value })} />
+          <input className="input" type="date" value={task.dueDate} onChange={(e) => setTask({ ...task, dueDate: e.target.value })} />
         </div>
         <button className="btn-ghost" disabled={busy || !task.title || !task.picUserId || !task.dueDate}
           onClick={() => run(async () => { await api(`/reports/${id}/tasks`, { method: "POST", json: task }); setTask({ title: "", picUserId: "", dueDate: "" }); })}>

@@ -20,11 +20,11 @@ export default function History() {
     <div className="space-y-3">
       {overdue.length > 0 && <div className="card border-red-300 text-sm text-red-700">{overdue.length} follow-up terlambat</div>}
       <h1 className="text-lg font-semibold">Activity History</h1>
-      {rows.length === 0 && <p className="text-gray-600">Belum ada report.</p>}
+      {rows.length === 0 && <p className="text-slate-500">Belum ada report.</p>}
       {rows.map((r) => (
         <Link key={r.id} href={`/reports/${r.id}`} className="card block">
           <div className="flex justify-between text-sm"><b>{ACTIVITY_TYPES[r.activityType]}{r.area ? ` · ${r.area}` : ""}</b><span>{STATUS[r.status]}</span></div>
-          <div className="text-xs text-gray-600">{fmtDate(r.activityAt)} · {r.pics}</div>
+          <div className="text-xs text-slate-500">{fmtDate(r.activityAt)} · {r.pics}</div>
           <div className="mt-1 text-xs">📷 {r.photoCount} · {r.locationStatus === "VERIFIED" ? "✅ GPS Verified" : "⚠ Location Unverified"}</div>
         </Link>
       ))}

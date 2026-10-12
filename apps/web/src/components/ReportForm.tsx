@@ -38,7 +38,7 @@ export default function ReportForm({ initial, onSaved }: { initial?: any; onSave
     <div className="card space-y-3">
       <div>
         <label className="lbl">Activity Type</label>
-        <select className="inp" value={f.activityType} onChange={(e) => setF({ ...f, activityType: e.target.value })}>
+        <select className="input" value={f.activityType} onChange={(e) => setF({ ...f, activityType: e.target.value })}>
           {Object.entries(ACTIVITY_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
       </div>
@@ -56,23 +56,23 @@ export default function ReportForm({ initial, onSaved }: { initial?: any; onSave
       {(["counterpart", "accountName", "area"] as const).map((k) => (
         <div key={k}>
           <label className="lbl">{{ counterpart: "Counterpart", accountName: "Account / organisasi", area: "Area / wilayah" }[k]}</label>
-          <input className="inp" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+          <input className="input" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
         </div>
       ))}
-      <div><label className="lbl">Summary</label><textarea className="inp" rows={3} value={f.summary} onChange={(e) => setF({ ...f, summary: e.target.value })} /></div>
+      <div><label className="lbl">Summary</label><textarea className="input" rows={3} value={f.summary} onChange={(e) => setF({ ...f, summary: e.target.value })} /></div>
       {(Object.keys(LABELS) as (keyof Items)[]).map((k) => (
         <div key={k}>
           <label className="lbl">{LABELS[k]}</label>
           {items[k].map((t, i) => (
             <div key={i} className="mb-2 flex gap-2">
-              <input className="inp" value={t} onChange={(e) => setItem(k, i, e.target.value)} />
+              <input className="input" value={t} onChange={(e) => setItem(k, i, e.target.value)} />
               <button type="button" className="btn-ghost" aria-label="Hapus" onClick={() => setItems({ ...items, [k]: items[k].filter((_, j) => j !== i) })}>✕</button>
             </div>
           ))}
           <button type="button" className="btn-ghost" onClick={() => setItems({ ...items, [k]: [...items[k], ""] })}>+ Tambah</button>
         </div>
       ))}
-      <div><label className="lbl">Next Action</label><input className="inp" value={f.nextAction} onChange={(e) => setF({ ...f, nextAction: e.target.value })} /></div>
+      <div><label className="lbl">Next Action</label><input className="input" value={f.nextAction} onChange={(e) => setF({ ...f, nextAction: e.target.value })} /></div>
       {err && <p className="text-sm text-red-600">{err}</p>}
       <button className="btn w-full" onClick={save} disabled={busy || picIds.length === 0}>{busy ? "Menyimpan…" : initial ? "Simpan perubahan" : "Simpan sebagai Draft"}</button>
     </div>
