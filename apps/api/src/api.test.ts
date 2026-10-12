@@ -506,3 +506,55 @@ test("Dashboard KPI: rentang tanggal, cakupan staf vs reviewer, filter marketing
   assert.equal(d.field.tasks.overdue >= 0, true);
   assert.equal((await rq("tMktTanpaAkses", "/dashboard")).s, 403);
 });
+
+test("Jejak marketing permanen: snapshot id+nama pada lead & penawaran; tahan ganti nama/hapus di WO; payload PUT WO selalu memuat marketingUserId+marketingName", async () => {
+  const j = async (r: Response) => ({ s: r.status, d: await r.json().catch(() => ({})) as any });
+  const rq = (tok: string, m: string, path: string, body?: unknown) => call(tok, m, "/crm/api" + path, body).then(j);
+  const { quotationWoPayload } = await import("./woPayload.js");
+  const { detail } = await import("./quotations.js");
+
+  const item = (await rq("tMgr", "POST", "/catalog", { name: "Jejak Item", sku: "JEJAK-1", kind: "SERVICE", unit: "paket", price: 1000000 })).d.id;
+  const lead = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Pelanggan Jejak", phone: "081399990001" })).d;
+  assert.deepEqual([lead.ownerId, lead.ownerName, lead.createdBy, lead.createdByName], ["u-nurman", "Nurman", "u-nurman", "Nurman"]);
+  const q = (await rq("tNurman", "POST", "/quotations", { leadId: lead.id, lines: [{ catalogId: item, qty: 2 }] })).d;
+  assert.deepEqual([q.marketingUserId, q.marketingName, q.createdByName], ["u-nurman", "Nurman", "Nurman"]);
+
+  // pengguna di WO berganti nama, lalu dihapus dari cache → jejak tetap
+  await pool.query("UPDATE wo_user_cache SET name='Nurman Baru', role='NOC' WHERE user_id='u-nurman'");
+  let again = (await rq("tMgr", "GET", `/quotations/${q.id}`)).d;
+  assert.deepEqual([again.marketingUserId, again.marketingName], ["u-nurman", "Nurman"]);
+  await pool.query("DELETE FROM wo_user_cache WHERE user_id='u-nurman'");
+  again = (await rq("tMgr", "GET", `/quotations/${q.id}`)).d;
+  assert.deepEqual([again.marketingUserId, again.marketingName, again.createdByName], ["u-nurman", "Nurman", "Nurman"]);
+  assert.equal((await rq("tMgr", "GET", `/leads/${lead.id}`)).d.ownerName, "Nurman");
+
+  // payload ke WO: hanya status yang perlu dikirim; selalu membawa id + nama marketing (snapshot)
+  assert.equal(quotationWoPayload(again), null); // DRAFT tidak dikirim
+  await rq("tNurman", "POST", `/quotations/${q.id}/submit`); await rq("tMgr", "POST", `/quotations/${q.id}/approve`);
+  assert.equal(quotationWoPayload((await rq("tMgr", "GET", `/quotations/${q.id}`)).d), null); // APPROVED belum
+  await rq("tNurman", "POST", `/quotations/${q.id}/send`);
+  const sent = quotationWoPayload(await detail((await pool.query("SELECT * FROM quotations WHERE id=$1", [q.id])).rows[0]))!;
+  assert.equal(sent.status, "QUOTED"); assert.equal(sent.marketingUserId, "u-nurman"); assert.equal(sent.marketingName, "Nurman");
+  assert.equal(sent.lines[0].sku, "JEJAK-1"); assert.equal(sent.lines[0].qty, 2); assert.equal(sent.total, 2220000);
+  await rq("tNurman", "POST", `/quotations/${q.id}/accept`);
+  const won = quotationWoPayload(await detail((await pool.query("SELECT * FROM quotations WHERE id=$1", [q.id])).rows[0]))!;
+  assert.equal(won.status, "WON"); assert.equal(won.marketingUserId, "u-nurman"); assert.equal(won.marketingName, "Nurman");
+
+  // penjaga DB: kolom jejak tidak bisa diubah (bahkan lewat SQL langsung)
+  await assert.rejects(pool.query("UPDATE quotations SET owner_name='Lain' WHERE id=$1", [q.id]), /jejak permanen/);
+  await assert.rejects(pool.query("UPDATE quotations SET owner_id='u-x' WHERE id=$1", [q.id]), /jejak permanen/);
+  await assert.rejects(pool.query("UPDATE quotations SET created_by_name='Lain' WHERE id=$1", [q.id]), /jejak permanen/);
+  await assert.rejects(pool.query("UPDATE leads SET created_by='u-x' WHERE id=$1", [lead.id]), /jejak permanen/);
+
+  // pergantian pemilik lead oleh reviewer: tercatat id+nama lama→baru; penawaran lama tetap atas nama marketing awal tetapi terlihat pemilik baru
+  const l2 = (await rq("tRasyad", "POST", "/leads", { kind: "NON_INTERNET", name: "Pindah Tangan", phone: "081399990002" })).d;
+  const q2 = (await rq("tRasyad", "POST", "/quotations", { leadId: l2.id, lines: [{ catalogId: item, qty: 1 }] })).d;
+  assert.equal((await rq("tMgr", "PATCH", `/leads/${l2.id}`, { ownerId: "tidak-ada" })).s, 400); // pemilik harus user MKT/ADMIN yang dikenal
+  await pool.query("INSERT INTO wo_user_cache (user_id,name,role) VALUES ('u-baru','Marketing Baru','MKT') ON CONFLICT (user_id) DO UPDATE SET name='Marketing Baru'");
+  const moved = (await rq("tMgr", "PATCH", `/leads/${l2.id}`, { ownerId: "u-baru" })).d;
+  assert.deepEqual([moved.ownerId, moved.ownerName], ["u-baru", "Marketing Baru"]);
+  assert.match(moved.events.find((e: any) => e.type === "OWNER").note, /Rasyad \(u-rasyad\) → Marketing Baru \(u-baru\)/);
+  const q2again = (await rq("tMgr", "GET", `/quotations/${q2.id}`)).d;
+  assert.deepEqual([q2again.marketingUserId, q2again.marketingName], ["u-rasyad", "Rasyad"]); // penawaran tidak ikut berganti nama pemilik
+  assert.equal((await rq("tRasyad", "GET", `/quotations/${q2.id}`)).s, 200); // pembuat tetap bisa melihat
+});

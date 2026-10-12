@@ -48,7 +48,7 @@ export default function QuotationDetail({ params }: { params: Promise<{ id: stri
           <span className={`rounded px-2 py-0.5 text-xs ${qTone(s)}`}>{QSTATUS[s]}</span>
         </div>
         <div>{q.customerName}{q.subject ? ` — ${q.subject}` : ""}</div>
-        <div className="text-slate-500">Pemilik: {q.ownerName}{q.validUntil ? ` · berlaku s.d. ${q.validUntil}` : ""}</div>
+        <div className="text-slate-500">Marketing: {q.marketingName} <span className="text-xs">({q.marketingUserId})</span> · dibuat oleh {q.createdByName}{q.validUntil ? ` · berlaku s.d. ${q.validUntil}` : ""}</div>
         {q.lead && <div className="text-xs"><Link className="btn-link" href={`/leads/${q.lead.id}`}>Lead: {q.lead.name}</Link></div>}
         {q.decisionNote && <p className="text-slate-600">Catatan keputusan: {q.decisionNote}</p>}
         {s === "ACCEPTED" && <p className="text-xs text-green-700">Terkunci. Penawaran ini menjadi dasar pekerjaan; perubahan lingkup = penawaran baru.</p>}

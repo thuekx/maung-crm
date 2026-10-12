@@ -38,7 +38,8 @@ const bodySchema = z.object({
 const scope = (u: Principal, args: unknown[]) => {
   if (isReviewer(u)) return "TRUE";
   args.push(u.id);
-  return `(q.owner_id=$${args.length} OR q.created_by=$${args.length})`;
+  // Penawaran tetap terlihat oleh pemilik lead saat ini walau lead dipindahtangankan (jejak pemilik penawaran tidak berubah).
+  return `(q.owner_id=$${args.length} OR q.created_by=$${args.length} OR EXISTS (SELECT 1 FROM leads lx WHERE lx.id=q.lead_id AND lx.owner_id=$${args.length}))`;
 };
 async function load(id: number, u: Principal) {
   const args: unknown[] = [id];
@@ -84,7 +85,7 @@ async function writeLines(db: Q, id: number, lines: z.infer<typeof lineSchema>[]
   return priced;
 }
 
-async function detail(q: any) {
+export async function detail(q: any) {
   const [lines, events, revs, lead] = await Promise.all([
     pool.query(`SELECT id, position, catalog_id AS "catalogId", name, sku, kind, unit, qty, unit_price AS "unitPrice", note FROM quotation_lines WHERE quotation_id=$1 ORDER BY position`, [q.id]),
     pool.query(`SELECT id, type, from_status AS "fromStatus", to_status AS "toStatus", note, actor_name AS "actorName", at FROM quotation_events WHERE quotation_id=$1 ORDER BY at, id`, [q.id]),
@@ -93,7 +94,7 @@ async function detail(q: any) {
   ]);
   const n = (v: unknown) => Number(v);
   return {
-    id: q.id, number: q.number, rev: q.rev, status: q.status, leadId: q.lead_id, lead: lead.rows[0] ?? null, ownerId: q.owner_id, ownerName: q.owner_name,
+    id: q.id, number: q.number, rev: q.rev, status: q.status, leadId: q.lead_id, lead: lead.rows[0] ?? null, ownerId: q.owner_id, ownerName: q.owner_name, marketingUserId: q.owner_id, marketingName: q.owner_name, createdBy: q.created_by, createdByName: q.created_by_name,
     customerCode: q.customer_code, customerName: q.customer_name, customerPhone: q.customer_phone, customerEmail: q.customer_email, customerAddress: q.customer_address,
     picName: q.pic_name, subject: q.subject, validUntil: q.valid_until ? String(q.valid_until).slice(0, 10) : null, terms: q.terms, notes: q.notes,
     taxRate: n(q.tax_rate), discount: n(q.discount), subtotal: n(q.subtotal), taxAmount: n(q.tax_amount), total: n(q.total),
@@ -130,10 +131,10 @@ quotationRoutes.post("/", ah(async (req, res) => {
     const number = await nextNumber(c, new Date());
     const lines = b.lines ?? [];
     const r = await c.query(
-      `INSERT INTO quotations (number,lead_id,owner_id,owner_name,customer_code,customer_name,customer_phone,customer_email,customer_address,pic_name,subject,valid_until,terms,notes,tax_rate,discount,created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+      `INSERT INTO quotations (number,lead_id,owner_id,owner_name,customer_code,customer_name,customer_phone,customer_email,customer_address,pic_name,subject,valid_until,terms,notes,tax_rate,discount,created_by,created_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
       [number, lead.id, lead.owner_id, lead.owner_name, lead.customer_code, b.customerName ?? lead.name, b.customerPhone ?? lead.phone, b.customerEmail ?? lead.email, b.customerAddress ?? lead.address,
-       b.picName ?? null, b.subject ?? lead.interest ?? null, b.validUntil ?? new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10), b.terms ?? DEFAULT_TERMS, b.notes ?? null, b.taxRate ?? 11, b.discount ?? 0, u.id]);
+       b.picName ?? null, b.subject ?? lead.interest ?? null, b.validUntil ?? new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10), b.terms ?? DEFAULT_TERMS, b.notes ?? null, b.taxRate ?? 11, b.discount ?? 0, u.id, u.name]);
     id = r.rows[0].id;
     const t = totals(await writeLines(c, id, lines), b.discount ?? 0, b.taxRate ?? 11);
     await c.query("UPDATE quotations SET subtotal=$2, tax_amount=$3, total=$4 WHERE id=$1", [id, t.subtotal, t.taxAmount, t.total]);

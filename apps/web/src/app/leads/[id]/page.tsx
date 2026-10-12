@@ -60,7 +60,7 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
           <b className="text-base">{l.name}</b>
           <span className={`rounded px-2 py-0.5 text-xs ${stageTone(l.stage)}`}>{STAGE[l.stage] ?? l.stage}</span>
         </div>
-        <div className="text-slate-500">{KIND[l.kind]} · pemilik: {l.ownerName}</div>
+        <div className="text-slate-500">{KIND[l.kind]} · pemilik: {l.ownerName} · dibuat oleh {l.createdByName}</div>
         <div>{l.phone}{l.phoneNorm ? <span className="text-xs text-slate-500"> · E.164 +{l.phoneNorm}</span> : <span className="text-xs text-amber-700"> · nomor tidak valid</span>}</div>
         {l.email && <div>{l.email}</div>}
         {l.address && <div>{l.address}{l.area ? ` · ${l.area}` : ""}</div>}
@@ -132,7 +132,7 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
           {[...l.events].reverse().map((e: any) => (
             <li key={e.id} className="text-xs text-slate-600">
               <span className="text-slate-500">{fmtDate(e.at)}</span> · {e.actorName ?? "otomatis (sinkron WO)"} ·{" "}
-              {e.type === "STAGE" ? `${STAGE[e.fromStage] ?? e.fromStage} → ${STAGE[e.toStage] ?? e.toStage}` : e.type === "CREATED" ? "dibuat" : e.type === "LINKED" ? "tertaut" : e.type === "UNLINKED" ? "tautan dilepas" : "diubah"}
+              {e.type === "STAGE" ? `${STAGE[e.fromStage] ?? e.fromStage} → ${STAGE[e.toStage] ?? e.toStage}` : e.type === "CREATED" ? "dibuat" : e.type === "LINKED" ? "tertaut" : e.type === "UNLINKED" ? "tautan dilepas" : e.type === "OWNER" ? "ganti pemilik" : "diubah"}
               {e.note ? ` — ${e.note}` : ""}
             </li>
           ))}

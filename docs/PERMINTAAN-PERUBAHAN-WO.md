@@ -34,12 +34,14 @@ Badan permintaan (usulan):
   "crmId": "uuid", "number": "QT-026-0001", "rev": 2, "status": "QUOTED|WON|LOST",
   "validUntil": "2026-11-30", "sentAt": "…", "decidedAt": "…", "lostReason": "…",
   "customer": { "code": null /* kode pelanggan WO bila Lead untuk pelanggan existing; null = pelanggan baru */, "name": "…", "phone": "628…", "email": "…", "address": "…", "lat": null, "lng": null, "areaCode": "…", "picName": "…" },
-  "marketingName": "…",
+  "marketingUserId": "id pengguna WO (dari /auth/me saat dibuat)", "marketingName": "snapshot nama saat dibuat",
   "lines": [ { "catalogCrmId": "uuid", "sku": "opsional/null", "name": "…", "kind": "SERVICE", "qty": 1, "unit": "paket", "unitPrice": 0, "note": "…" } ],
   "total": 0, "taxNote": "PPN …", "terms": "…"
 }
 ```
 SKU pada baris bersifat **opsional** (kolom `sku` di katalog CRM, unik bila diisi): bila ada, WO memakainya untuk memetakan ke master barang; bila `null`, Marketing memetakan manual di WO.
+
+**Aturan jejak (pemilik):** `marketingUserId` + `marketingName` ada di **setiap** `PUT quotation` (dibangun di `apps/api/src/woPayload.ts`, diuji). Keduanya snapshot permanen di CRM (kolom penawaran/lead dilindungi trigger DB; ganti nama/nonaktif/pindah peran/dihapus di WO tidak mengubahnya). WO diminta menyimpan keduanya apa adanya pada pelanggan CRM/`SERVICE_ORDER`/PR proyek turunan (jangan menimpa dengan nama pengguna WO saat ini) dan menolak (422) permintaan tanpa salah satunya.
 
 Pertanyaan keputusan pemilik: **apakah harga ikut dikirim ke WO?** Rekomendasi: ya (WO butuh angka untuk "trigger invoice"), tetapi **tidak** dimasukkan ke Export API (sama seperti `installFee/monthlyFee` pada `subscriptions`).
 

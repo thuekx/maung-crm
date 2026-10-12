@@ -147,9 +147,9 @@ leadRoutes.post("/", ah(async (req, res) => {
   try {
     await c.query("BEGIN");
     const r = await c.query(
-      `INSERT INTO leads (kind,name,phone,phone_norm,phone_digits,email,address,area,interest,source,notes,owner_id,owner_name,existing_customer,created_by,created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
-      [b.kind, b.name, b.phone, p.e164, p.digits || null, b.email ?? null, b.address ?? null, b.area ?? null, b.interest ?? null, b.source ?? null, b.notes ?? null, ownerId, ownerName, existing, u.id, now]);
+      `INSERT INTO leads (kind,name,phone,phone_norm,phone_digits,email,address,area,interest,source,notes,owner_id,owner_name,existing_customer,created_by,created_by_name,created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+      [b.kind, b.name, b.phone, p.e164, p.digits || null, b.email ?? null, b.address ?? null, b.area ?? null, b.interest ?? null, b.source ?? null, b.notes ?? null, ownerId, ownerName, existing, u.id, u.name, now]);
     id = r.rows[0].id;
     await event(c, id, "CREATED", { to: "NEW", actor: u });
     if (auto) {
@@ -171,7 +171,7 @@ async function detail(l: any) {
   ]);
   return {
     id: l.id, kind: l.kind, stage: l.stage, name: l.name, phone: l.phone, phoneNorm: l.phone_norm, email: l.email, address: l.address, area: l.area,
-    interest: l.interest, source: l.source, notes: l.notes, ownerId: l.owner_id, ownerName: l.owner_name,
+    interest: l.interest, source: l.source, notes: l.notes, ownerId: l.owner_id, ownerName: l.owner_name, createdBy: l.created_by, createdByName: l.created_by_name,
     customerCode: l.customer_code, linkState: l.link_state, existingCustomer: l.existing_customer,
     lostReason: l.lost_reason, lostAuto: l.lost_auto, wonAt: l.won_at, closedAt: l.closed_at, createdAt: l.created_at, updatedAt: l.updated_at,
     customer: cust.rows[0] ?? null, events: events.rows, stages: STAGES[l.kind as Kind], manualStages: MANUAL[l.kind as Kind],
@@ -212,6 +212,7 @@ leadRoutes.patch("/:id", ah(async (req, res) => {
   if (!OPEN.includes(l.stage) && !isReviewer(u)) throw fail(409, "Lead sudah ditutup");
   if (b.ownerId && b.ownerId !== l.owner_id && !isReviewer(u)) throw fail(403, "Hanya reviewer yang boleh mengganti pemilik");
   const sets: string[] = [], args: unknown[] = [id];
+  let ownerNote: string | null = null;
   const put = (col: string, v: unknown) => { args.push(v ?? null); sets.push(`${col}=$${args.length}`); };
   if (b.name !== undefined) put("name", b.name);
   if (b.phone !== undefined) { const p = normalizePhone(b.phone); put("phone", b.phone); put("phone_norm", p.e164); put("phone_digits", p.digits || null); }
@@ -221,10 +222,12 @@ leadRoutes.patch("/:id", ah(async (req, res) => {
     const o = await pool.query("SELECT user_id, name FROM wo_user_cache WHERE user_id=$1 AND role IN ('MKT','ADMIN')", [b.ownerId]);
     if (!o.rows[0]) throw fail(400, "Pemilik tidak dikenal");
     put("owner_id", o.rows[0].user_id); put("owner_name", o.rows[0].name);
+    ownerNote = `Pemilik: ${l.owner_name} (${l.owner_id}) → ${o.rows[0].name} (${o.rows[0].user_id})`;
   }
   if (sets.length) {
     await pool.query(`UPDATE leads SET ${sets.join(", ")}, updated_at=now() WHERE id=$1`, args);
     await event(pool, id, "UPDATED", { note: Object.keys(b).join(", "), actor: u });
+    if (ownerNote) await event(pool, id, "OWNER", { note: ownerNote, actor: u }); // jejak pergantian pemilik: id + nama keduanya
     await audit(u.id, "lead", id, "UPDATE", null, b);
   }
   res.json(await detail(await loadLead(id, u)));
