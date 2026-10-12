@@ -22,6 +22,7 @@ let wo: http.Server, api: http.Server, base = "";
 // Pintu masuk CRM → WO tiruan mengikuti docs/API.md WO ("Integrasi CRM → WO"): kunci x-api-key, validasi isi, aturan WON terkunci/stale/duplicate.
 const CRM_KEY = "k-test-crm-integration";
 let woMode: string = "ok";
+let woOrderSeq = 0;
 const woCalls: { method: string; path: string; body: any }[] = [];
 const woCatalog = new Map<string, any>(), woQuotes = new Map<string, any>();
 const crmMock = (req: http.IncomingMessage, res: http.ServerResponse) => {
@@ -46,13 +47,15 @@ const crmMock = (req: http.IncomingMessage, res: http.ServerResponse) => {
     if (!(c.name?.length >= 2) || !/^[0-9+][0-9 +()-]*$/.test(c.phone ?? "") || c.phone.length < 6 || !(c.address?.length >= 5) || !Array.isArray(body.lines) || !body.lines.length) return send(400, { error: "isian penawaran tidak valid" });
     if (c.code && c.code !== "A5") return send(404, { error: `Pelanggan ${c.code} tidak ditemukan di WO` });
     const cur = woQuotes.get(crmId);
-    const view = (q: any) => ({ quotationId: "w1", crmId, number: q.number, rev: q.rev, status: q.status, woNumber: null });
+    const view = (q: any) => ({ quotationId: "w1", crmId, number: q.number, rev: q.rev, status: q.status, woNumber: q.woNumber ?? null });
     if (cur) {
       if (body.rev < cur.rev) return send(200, { ok: true, stale: true, ...view(cur) });
       if (cur.status === "WON" && (body.rev > cur.rev || body.status !== "WON")) return send(409, { error: "Penawaran sudah WON dan terkunci" });
-      if (body.rev === cur.rev && body.status === cur.status) return send(200, { ok: true, duplicate: true, ...view(cur) });
+      if (body.rev === cur.rev && body.status === cur.status && !(cur.status === "WON" && !cur.woNumber)) return send(200, { ok: true, duplicate: true, ...view(cur) });
       if (body.rev === cur.rev && cur.status === "LOST") return send(409, { error: "sudah LOST pada revisi ini" });
     }
+    // Tahap 2b WO: WON membentuk pelanggan + order jasa (nomor WO-SO-…); WON lama tanpa order diproses ulang saat dikirim ulang
+    if (body.status === "WON") body.woNumber = cur?.woNumber ?? `WO-SO-${String(++woOrderSeq).padStart(4, "0")}`; else if (cur?.woNumber) body.woNumber = cur.woNumber;
     woQuotes.set(crmId, body);
     send(cur ? 200 : 201, { ok: true, ...view(body), warnings: { marketingMatched: body.marketingUserId === "u-nurman", unknownCatalog: [], skuNotFound: [], areaNotFound: false } });
   });
@@ -689,6 +692,16 @@ test("Kirim CRM → WO (outbox): katalog dulu baru penawaran, jejak marketing, i
   woMode = "ok"; await due(); r = await processOutbox(); assert.equal(r.done, 1);
   assert.equal(woQuotes.get(`quotation-${q.id}`).status, "WON");
   assert.equal((await q1("SELECT wo_synced_status FROM quotations WHERE id=$1", [q.id]))[0].wo_synced_status, "WON");
+  // Tahap 2b: respons WON memuat nomor order WO → tersimpan & tampil
+  const orderNo = (await q1("SELECT wo_number FROM quotations WHERE id=$1", [q.id]))[0].wo_number;
+  assert.match(orderNo, /^WO-SO-\d{4}$/);
+  assert.equal((await rq("tMgr", "GET", `/quotations/${q.id}`)).d.wo.woNumber, orderNo);
+  // WON lama tanpa nomor order (terkirim sebelum 2b aktif) dikirim ulang agar WO membentuk order; WON yang sudah punya order tidak dikirim ulang
+  woCalls.length = 0; await enqueue("QUOTATION", q.id); await processOutbox(); assert.equal(woCalls.length, 0);
+  await pool.query("UPDATE quotations SET wo_number=NULL WHERE id=$1", [q.id]); woQuotes.get(`quotation-${q.id}`).woNumber = null;
+  await enqueue("QUOTATION", q.id); await processOutbox();
+  assert.equal(woCalls.filter((c) => c.path.includes(`quotation-${q.id}`)).length, 1);
+  assert.match((await q1("SELECT wo_number FROM quotations WHERE id=$1", [q.id]))[0].wo_number, /^WO-SO-\d{4}$/);
 
   // 4) kunci salah (401) → dicoba ulang (masalah konfigurasi), pesan tidak memuat kunci
   const l2 = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Kantor Outbox", phone: "0812 8888 0002", address: "Jl. Kantor No. 9, Bandung" })).d;

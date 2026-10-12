@@ -69,8 +69,10 @@ export default function QuotationDetail({ params }: { params: Promise<{ id: stri
       {q.wo && (
         <Section icon="sync" title="Sinkron ke WO">
           {q.wo.syncedAt ? (
-            <p className="text-slate-600">Tersinkron: {q.wo.syncedStatus} (rev {q.wo.syncedRev}) · {fmtDate(q.wo.syncedAt)}{q.wo.woNumber ? ` · WO ${q.wo.woNumber}` : ""}</p>
+            <p className="text-slate-600">Tersinkron: {q.wo.syncedStatus} (rev {q.wo.syncedRev}) · {fmtDate(q.wo.syncedAt)}</p>
           ) : <p className="text-slate-500">{["SENT", "ACCEPTED", "REJECTED", "EXPIRED"].includes(s) ? "Menunggu dikirim ke WO." : "Belum dikirim ke WO (dikirim saat status Terkirim)."}</p>}
+          {q.wo.woNumber && <p className="flex items-center gap-2 text-sm"><Badge tone="green" dot>Order di WO</Badge><b className="text-brand-900 dark:text-white">{q.wo.woNumber}</b><span className="text-xs text-slate-500">— lanjutan pekerjaan (sumber barang, jadwal, BA) dikerjakan di WO</span></p>}
+          {s === "ACCEPTED" && q.wo.syncedAt && !q.wo.woNumber && <p className="text-xs text-amber-700">Penawaran WON sudah terkirim tetapi WO belum membentuk order — dikirim ulang otomatis; bila tetap kosong, hubungi admin WO.</p>}
           {q.wo.warnings?.error && <p className="text-red-600">Ditolak WO: {q.wo.warnings.error}</p>}
           {q.wo.warnings?.marketingMatched === false && <p className="text-xs text-amber-700">Marketing {q.marketingName} tidak dikenali sebagai pengguna MKT aktif di WO — nama &amp; id tetap tersimpan apa adanya.</p>}
         </Section>

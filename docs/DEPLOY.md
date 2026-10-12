@@ -72,6 +72,16 @@ cd ~/Maung-Wo-Inv && bash scripts/garage-platform.sh finalize </dev/null
 ```
 Uji manual sesudahnya (login WO → /apps → CRM): buat Lead non-internet → Penawaran → Setujui → Tandai terkirim → di WO muncul penawaran QUOTED (Admin WO); Dashboard → panel "Kirim ke WO" harus `menunggu 0 · ditolak WO 0`. Sakelar darurat: `WO_SYNC_ENABLED=0` di `.env` lalu `docker compose up -d crm-api` (antrean tetap tersimpan).
 
+## E3. Uji penawaran → order WO (Tahap 2b WO, `70bc18a`)
+Penawaran `ACCEPTED` membuat **pelanggan + WO Order Jasa (WO-SO-…) sungguhan di WO** (data produksi). Gunakan nama pelanggan yang jelas bertanda uji (mis. "UJI CRM-WO (boleh dibatalkan)") dan batalkan order ujinya di WO setelah selesai (aksi `cancel_order`).
+1. Di CRM (akun Marketing): Lead non-internet → Buat penawaran (isi **alamat** & telepon valid) → Ajukan → (Manager) Setujui → Tandai terkirim → Pelanggan menyetujui. Marketing yang membuat = pemegang order di WO.
+2. Cek dari server (baca-saja, kunci tidak dicetak):
+```
+cd ~/maung-crm && bash scripts/check-quotation-wo.sh
+```
+   (atau satu nomor: `bash scripts/check-quotation-wo.sh QT-026-0001`). `order_wo_terbentuk=1` + nomor `WO-SO-…` = berhasil. Antrean kirim berjalan tiap ±1 menit, jadi tunggu 1–2 menit setelah klik.
+3. Cek di WO (UI): order muncul untuk marketing pembuat, jejak marketing (id + nama) terisi, SKU produk terpetakan ke barang bila SKU diisi.
+
 ## E. Yang sudah dan belum teruji
 - Teruji otomatis (CI): tes API, tes web (termasuk larangan HTML mentah), tes aturan compose, validasi compose, **alur `update.sh` dan `setup-deploy-key.sh` dengan docker/curl/ssh/git tiruan** (`tests/server-scripts/`: migrasi sukses, tiap jenis kegagalan + rollback, update kedua, host salah, root, `.env`/container WO berubah, secret tidak tercetak).
 - **Belum pernah dijalankan di server asli**: container sungguhan, Garage asli, Caddy `crm.caddy`, `/api/auth/me` WO asli (E2E memakai mock). Risiko ini dicatat; RESULT `update.sh` adalah buktinya.

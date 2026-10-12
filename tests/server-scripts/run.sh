@@ -199,6 +199,24 @@ chk "H5 crm-api tidak menerima kunci (compose lama): diperingatkan" "has h5 'tid
 hprep h6; printf 'pending:2 blocked:1' > $S/stub-h6/outbox; own $S/stub-h6; run h6
 chk "H6 ada item DITOLAK WO di antrean: peringatan + arah ke Dashboard" "has h6 'e_antrean_kirim_ke_wo=pending:2 blocked:1' && has h6 'DITOLAK WO'"
 
+echo "### L* scripts/check-quotation-wo.sh (baca-saja)"
+runl() { n=$1; shift; as_user "cd $S/home-$n/maung-crm && HOME=$S/home-$n STUB=$S/stub-$n PATH=$S/bin:\$PATH EXPECT_HOST=\${EXPECT_HOST_OVERRIDE:-$(hostname)} $* bash scripts/check-quotation-wo.sh ${ARGS:-} </dev/null" > $S/out-$n.txt 2>&1; echo $? > $S/rc-$n; }
+lprep() { setup $1; touch $S/stub-$1/crm_up; own $S/stub-$1 $S/home-$1; }
+lprep l1; runl l1
+chk "L1 penawaran diterima + order WO terbentuk → PASS; kunci tak tercetak; tanpa perubahan" "has l1 'status=PASS' && has l1 'order_wo_terbentuk=1' && has l1 'WO-SO-0001' && has l1 'perubahan_ke_sistem=TIDAK_ADA' && ! has l1 'CRM_INTEGRATION_KEY=' && ! calls l1 'compose up' && ! calls l1 'compose rm'"
+lprep l2; echo "7|QT-026-0007|rev1|ACCEPTED|WO:WON rev1|-|Nurman (u-nurman)" > $S/stub-l2/quots; echo "200 WON rev1 -" > $S/stub-l2/wo_get; own $S/stub-l2; runl l2
+chk "L2 DITERIMA tapi WO belum membentuk order → ATTENTION + petunjuk" "has l2 'status=ATTENTION' && has l2 'belum membentuk order' && has l2 'bermasalah=1'"
+lprep l3; echo "404 - - -" > $S/stub-l3/wo_get; own $S/stub-l3; runl l3
+chk "L3 tidak ada di WO (404) → ATTENTION + arah ke Dashboard" "has l3 'status=ATTENTION' && has l3 'TIDAK ada di WO'"
+lprep l4; echo "401 - - -" > $S/stub-l4/wo_get; own $S/stub-l4; runl l4
+chk "L4 kunci ditolak (401) → ATTENTION" "has l4 'status=ATTENTION' && has l4 'menolak kunci integrasi'"
+lprep l5; echo "5|QT-026-0005|rev1|DRAFT|WO:- rev-|-|Nurman (u-nurman)" > $S/stub-l5/quots; own $S/stub-l5; runl l5
+chk "L5 hanya draf → belum ada yang dicek, arah kirim penawaran uji" "has l5 'penawaran_diperiksa=0' && has l5 'KIRIM_PENAWARAN_UJI'"
+lprep l6; ARGS="'QT-1;rm -rf'" runl l6
+chk "L6 filter berbahaya ditolak" "has l6 'filter hanya boleh'"
+lprep l7; EXPECT_HOST_OVERRIDE=salah runl l7
+chk "L7 host salah ditolak" "has l7 'HOST SALAH'"
+
 echo; echo "UPDATE.SH TOTAL: lulus=$PASS gagal=$FAILC"; [ "$FAILC" = 0 ]
 
 ) || RC=1

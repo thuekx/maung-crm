@@ -30,7 +30,8 @@ export async function enqueueBackfill(): Promise<number> {
   const c = await pool.query(`SELECT id FROM catalog_items WHERE wo_synced_at IS NULL AND NOT EXISTS (SELECT 1 FROM wo_outbox o WHERE o.kind='CATALOG' AND o.ref_id=catalog_items.id AND o.status IN ('PENDING','BLOCKED'))`);
   const q = await pool.query(
     `SELECT id FROM quotations WHERE deleted_at IS NULL AND status IN ('SENT','ACCEPTED','REJECTED','EXPIRED')
-       AND (wo_synced_rev IS DISTINCT FROM rev OR wo_synced_status IS DISTINCT FROM CASE status WHEN 'SENT' THEN 'QUOTED' WHEN 'ACCEPTED' THEN 'WON' ELSE 'LOST' END)
+       AND (wo_synced_rev IS DISTINCT FROM rev OR wo_synced_status IS DISTINCT FROM CASE status WHEN 'SENT' THEN 'QUOTED' WHEN 'ACCEPTED' THEN 'WON' ELSE 'LOST' END
+            OR (status='ACCEPTED' AND wo_number IS NULL))
        AND NOT EXISTS (SELECT 1 FROM wo_outbox o WHERE o.kind='QUOTATION' AND o.ref_id=quotations.id AND o.status IN ('PENDING','BLOCKED'))`);
   for (const r of c.rows) await enqueue("CATALOG", r.id);
   for (const r of q.rows) await enqueue("QUOTATION", r.id);
@@ -82,7 +83,9 @@ async function pushQuotation(id: number) {
   const areaCode = areaName ? (await pool.query("SELECT code FROM wo_areas WHERE lower(name)=lower($1) AND code IS NOT NULL", [areaName])).rows[0]?.code ?? null : null;
   const payload = quotationWoPayload(q, { areaCode });
   if (!payload) return { skipped: true };
-  if (row.wo_synced_rev === payload.rev && row.wo_synced_status === payload.status) return { skipped: true, already: true };
+  // WON yang sudah terkirim tetapi belum punya nomor order WO (mis. dikirim sebelum Tahap 2b aktif di WO) dikirim ulang agar WO membentuk order.
+  const wonWithoutOrder = payload.status === "WON" && !row.wo_number;
+  if (row.wo_synced_rev === payload.rev && row.wo_synced_status === payload.status && !wonWithoutOrder) return { skipped: true, already: true };
   // Katalog yang dipakai harus sudah ada di WO (agar SKU/jenis terpetakan): kirim dulu bila belum/berubah.
   const cats = (await pool.query("SELECT DISTINCT c.id, c.wo_synced_at, c.name FROM quotation_lines l JOIN catalog_items c ON c.id=l.catalog_id WHERE l.quotation_id=$1", [id])).rows;
   for (const c of cats) {
