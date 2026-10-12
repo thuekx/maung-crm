@@ -9,6 +9,7 @@ import { useTheme, type ThemeChoice } from "@/lib/theme";
 const TABS = [
   { href: "/", label: "Riwayat" },
   { href: "/new", label: "Report Baru" },
+  { href: "/leads", label: "Lead" },
   { href: "/map", label: "Peta" },
 ];
 const THEMES: { v: ThemeChoice; label: string }[] = [

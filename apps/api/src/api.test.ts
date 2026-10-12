@@ -253,3 +253,75 @@ test("cermin WO: tarik penuh berhalaman, paket/area turunan, pencocokan nomor (E
   assert.deepEqual((await pool.query("SELECT name, kind, origin FROM wo_packages ORDER BY name")).rows, [{ name: "Home 20", kind: "INTERNET", origin: "EXPORT" }, { name: "Sewa WiFi", kind: "SERVICE", origin: "EXPORT" }]);
   delete process.env.WO_EXPORT_API_KEY;
 });
+
+test("Lead: tautan otomatis (internet & layanan tambahan), ikut status WO, tahap manual, cakupan, E.164 luar negeri", async () => {
+  const { runSync } = await import("./woSync.js");
+  process.env.WO_EXPORT_API_KEY = EXPORT_KEY;
+  const recent = new Date().toISOString(), old = "2026-01-01T00:00:00Z";
+  const cust = (code: string, name: string, phone: string, status: string, createdAt: string, extra: any = {}) => ({ code, name, phone, status, createdAt, packageName: "Home 20", areaName: "Bekasi", ...extra });
+  exportData = {
+    customers: [
+      cust("A1", "Baru Daftar", "0812-1110-0001", "PROSPECT", recent),
+      cust("A2", "Lama Aktif", "0812-2220-0002", "ACTIVE", old, { activatedAt: old }),
+      cust("A3", "Keluarga 1", "0812-3330-0003", "PROSPECT", recent),
+      cust("A4", "Keluarga 2", "0812-3330-0003", "PROSPECT", recent),
+      cust("A5", "Pelanggan CCTV", "+60 12-345 6789", "ACTIVE", old, { activatedAt: old }),
+    ],
+    subscriptions: [],
+  };
+  assert.equal((await runSync()).ok, true);
+  const mk = (tok: string, b: any) => call(tok, "POST", "/crm/api/leads", b);
+
+  // 1) internet, pendaftar baru → tertaut otomatis, tahap REGISTERED lalu mengikuti WO
+  let r = await mk("tNurman", { kind: "INTERNET", name: "Pak Baru", phone: "+62 812 1110 0001", interest: "Home 20" });
+  assert.equal(r.status, 201);
+  let l1 = await r.json();
+  assert.equal(l1.customerCode, "A1"); assert.equal(l1.linkState, "AUTO"); assert.equal(l1.stage, "REGISTERED");
+  exportData.customers[0].status = "INSTALLING"; await runSync();
+  assert.equal((await (await call("tNurman", "GET", `/crm/api/leads/${l1.id}`)).json()).stage, "INSTALLING");
+  exportData.customers[0] = { ...exportData.customers[0], status: "ACTIVE", activatedAt: new Date().toISOString() }; await runSync();
+  const won = await (await call("tNurman", "GET", `/crm/api/leads/${l1.id}`)).json();
+  assert.equal(won.stage, "WON"); assert.ok(won.wonAt);
+  assert.equal(won.events.at(-1).actorName, null); // otomatis (sinkron WO)
+
+  // 2) internet tetapi nomor milik pelanggan LAMA yang aktif → bukan Won; ditandai existing; tidak tertaut otomatis
+  l1 = await (await mk("tNurman", { kind: "INTERNET", name: "Sudah Pelanggan", phone: "081222200002" })).json();
+  assert.equal(l1.existingCustomer, true); assert.equal(l1.customerCode, null); assert.equal(l1.stage, "NEW");
+  assert.equal((await (await call("tNurman", "GET", `/crm/api/leads/${l1.id}/candidates`)).json()).exact[0].code, "A2");
+  await call("tNurman", "POST", `/crm/api/leads/${l1.id}/link`, { customerCode: "A2" }); await runSync();
+  const still = await (await call("tNurman", "GET", `/crm/api/leads/${l1.id}`)).json();
+  assert.equal(still.linkState, "MANUAL"); assert.equal(still.stage, "NEW"); // pelanggan lama aktif ≠ kemenangan
+  assert.equal((await call("tNurman", "POST", `/crm/api/leads/${l1.id}/stage`, { stage: "WON" })).status, 409); // won internet hanya mengikuti WO
+
+  // 3) nomor dipakai >1 pelanggan → tidak menebak, kandidat ditampilkan
+  const amb = await (await mk("tNurman", { kind: "INTERNET", name: "Anak", phone: "0812 3330 0003" })).json();
+  assert.equal(amb.customerCode, null); assert.equal(amb.candidates.exact.length, 2);
+
+  // 4) layanan tambahan (non-internet) untuk pelanggan existing LUAR NEGERI → tertaut sejak awal, status pelanggan tak disentuh
+  const cctv = await (await mk("tNurman", { kind: "NON_INTERNET", name: "Toko Ahmad", phone: "0060 12-345 6789", interest: "CCTV 4 titik" })).json();
+  assert.equal(cctv.customerCode, "A5"); assert.equal(cctv.linkState, "AUTO"); assert.equal(cctv.stage, "NEW"); assert.equal(cctv.customer.status, "ACTIVE");
+  for (const st of ["CONTACTED", "QUOTING", "NEGOTIATION"]) assert.equal((await call("tNurman", "POST", `/crm/api/leads/${cctv.id}/stage`, { stage: st })).status, 200);
+  assert.equal((await call("tNurman", "POST", `/crm/api/leads/${cctv.id}/stage`, { stage: "LOST" })).status, 400); // alasan wajib
+  assert.equal((await call("tNurman", "POST", `/crm/api/leads/${cctv.id}/stage`, { stage: "REGISTERED" })).status, 400); // bukan tahap non-internet
+
+  // 5) duplikat nomor terbuka → peringatan (tetap dibuat)
+  const dup = await (await mk("tRasyad", { kind: "NON_INTERNET", name: "Toko Ahmad 2", phone: "+60123456789" })).json();
+  assert.ok(dup.duplicates.some((d: any) => d.id === cctv.id));
+
+  // 6) cakupan: staf lain tak melihat; reviewer melihat; menutup & membuka kembali
+  assert.equal((await call("tRasyad", "GET", `/crm/api/leads/${cctv.id}`)).status, 404);
+  assert.ok((await (await call("tMgr", "GET", "/crm/api/leads")).json()).some((x: any) => x.id === cctv.id));
+  assert.ok(!(await (await call("tRasyad", "GET", "/crm/api/leads")).json()).some((x: any) => x.id === cctv.id));
+  assert.equal((await call("tNurman", "POST", `/crm/api/leads/${cctv.id}/stage`, { stage: "WON" })).status, 200);
+  assert.equal((await call("tNurman", "POST", `/crm/api/leads/${cctv.id}/stage`, { stage: "QUOTING" })).status, 403); // buka kembali = reviewer
+  assert.equal((await call("tMgr", "POST", `/crm/api/leads/${cctv.id}/stage`, { stage: "QUOTING" })).status, 200);
+  assert.equal((await call("tNurman", "POST", `/crm/api/leads/${cctv.id}/stage`, { stage: "LOST", reason: "Harga" })).status, 200);
+
+  // 7) validasi & akses
+  assert.equal((await mk("tNurman", { kind: "INTERNET", name: "Tanpa Nomor" })).status, 400);
+  assert.equal((await mk("tMktTanpaAkses", { kind: "INTERNET", name: "X", phone: "081234567890" })).status, 403);
+  assert.equal((await call("tNurman", "DELETE", `/crm/api/leads/${cctv.id}`)).status, 403);
+  const list = await (await call("tNurman", "GET", "/crm/api/leads?q=%2B62%20812%201110%200001")).json();
+  assert.equal(list.length, 1); // cari lewat nomor (format apa pun)
+  delete process.env.WO_EXPORT_API_KEY;
+});

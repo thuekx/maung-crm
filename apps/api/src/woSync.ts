@@ -1,6 +1,7 @@
 import { pool } from "./db.js";
 import { WO_URL } from "./auth.js";
 import { normalizePhone, phoneSuffix } from "./phone.js";
+import { refreshLeadLinks } from "./leads.js";
 
 /**
  * Sinkron cermin BACA-SAJA dari Export API Maung WO (`GET {WO_URL}/api/export/<resource>`, header x-api-key).
@@ -167,6 +168,7 @@ export async function runSync(): Promise<SyncResult> {
       try { await record(name, await fn()); }
       catch (e) { errors[name] = String((e as Error).message ?? e); await record(name, null, e); }
     }
+    if (!errors.customers) await refreshLeadLinks().catch((e) => { errors.leads = String((e as Error).message ?? e); });
     return { ok: Object.keys(errors).length === 0, errors };
   } finally { running = false; }
 }

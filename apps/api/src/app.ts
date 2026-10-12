@@ -8,6 +8,7 @@ import { locationStatus, validCoords } from "./gps.js";
 import { storage } from "./storage.js";
 import { lookupByPhone, runSync, syncStatus } from "./woSync.js";
 import { normalizePhone } from "./phone.js";
+import { leadRoutes } from "./leads.js";
 import { MAX_BYTES, compress, saveFile, sign, validateImage, verifySig } from "./files.js";
 
 const ACTIVITY_TYPES = ["CANVASSING", "MEETING", "FOLLOW_UP", "SURVEY", "PARTNERSHIP", "COMMUNITY_ENGAGEMENT", "LAINNYA"] as const;
@@ -154,6 +155,8 @@ export function createApp() {
     const r = await pool.query("SELECT user_id AS id, name FROM wo_user_cache WHERE role IN ('MKT','ADMIN') ORDER BY name");
     res.json(r.rows);
   }));
+
+  r.use("/leads", leadRoutes);
 
   // ── Cermin baca-saja data pelanggan Maung WO (tarik berkala lewat Export API) ──
   const CUST_COLS = `code, name, phone, email, address, package_name AS "packageName", status, radius_status AS "radiusStatus", sales_name AS "salesName",
