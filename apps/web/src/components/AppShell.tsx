@@ -8,6 +8,7 @@ import { useBranding } from "@/lib/brand";
 import { useTheme, type ThemeChoice } from "@/lib/theme";
 import { Icon, MarkM, type IconName } from "./icons";
 import { Avatar } from "./ui";
+import { BellButton, NotifPanel, useNotifs } from "./Notifications";
 
 interface Item { href: string; label: string; icon: IconName; short?: string; mobile?: boolean }
 const ITEMS: Item[] = [
@@ -34,6 +35,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [back, setBack] = useState("Menu Utama");
   const [me, setMe] = useState<any>(null); // profil dari WO (/api/auth/me)
   const [menu, setMenu] = useState(false);
+  const nf = useNotifs();
   const name = me?.name ?? "";
   const [logoOk, setLogoOk] = useState(true);
   const [admin, setAdmin] = useState(false); // menu Admin hanya untuk Admin ASLI (bukan peran lain / "bertindak sebagai")
@@ -63,7 +65,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="fixed inset-y-0 left-0 z-[1000] hidden w-60 flex-col bg-brand-900 text-white md:flex dark:bg-brand-950 print:hidden">
         <div className="flex items-center gap-3 border-b border-white/10 px-5 py-5">
           <Logo size={34} />
-          <div><div className="font-display text-lg font-semibold leading-5">CRM</div><div className="text-[11px] text-white/60">Sales &amp; Field Activities</div></div>
+          <div className="min-w-0 flex-1"><div className="font-display text-lg font-semibold leading-5">CRM</div><div className="text-[11px] text-white/60">Sales &amp; Field Activities</div></div>
+          <BellButton nf={nf} cls="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white" />
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {ITEMS.map((i) => (
@@ -103,6 +106,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <Logo size={26} />
         <span className="font-display text-lg font-semibold">CRM</span>
         <div className="ml-auto flex items-center gap-1">
+          <BellButton nf={nf} cls="rounded-lg p-2 text-white/80 hover:bg-white/10" />
           {themeBtn("rounded-lg p-2 text-white/80 hover:bg-white/10")}
           <div className="relative">
             <button className="flex items-center gap-1 rounded-full py-0.5 pl-0.5 pr-1.5 hover:bg-white/10" onClick={() => setMenu(!menu)} aria-label="Menu pengguna" aria-expanded={menu}>
@@ -121,6 +125,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+
+      <NotifPanel nf={nf} />
 
       <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-4 md:px-8 md:pb-10 md:pt-8 print:max-w-none print:p-0">{children}</main>
 

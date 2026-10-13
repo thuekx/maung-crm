@@ -1,3 +1,4 @@
+import { notify, reviewerIds } from "./notify.js";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import { audit, pool } from "./db.js";
@@ -262,5 +263,11 @@ quotationRoutes.post("/:id/:action", ah(async (req, res) => {
     await audit(u.id, "quotation", id, key.toUpperCase(), { status: q.status }, { status: a.to }, c);
     await c.query("COMMIT");
   } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
+  if (!q.is_demo) {
+    const href = `/quotations/${id}`;
+    if (key === "submit") await notify(await reviewerIds(u.id), { type: "QUOTATION_SUBMITTED", title: `Penawaran ${q.number} menunggu persetujuan`, body: `${q.customer_name} · diajukan ${u.name}`, href, key: `qt-sub:${id}:${q.rev}` });
+    if (key === "approve" && q.owner_id !== u.id) await notify([q.owner_id], { type: "QUOTATION_APPROVED", title: `Penawaran ${q.number} disetujui`, body: `${q.customer_name} · oleh ${u.name} — siap dikirim ke pelanggan`, href, key: `qt-app:${id}:${q.rev}` });
+    if (key === "return" && q.owner_id !== u.id) await notify([q.owner_id], { type: "QUOTATION_RETURNED", title: `Penawaran ${q.number} dikembalikan`, body: `${u.name}: ${body.note}`, href });
+  }
   res.json(await detail(await load(id, u)));
 }));

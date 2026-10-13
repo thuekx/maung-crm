@@ -464,9 +464,13 @@ test("Katalog & penawaran: hitung total di server, alur status, revisi, kunci se
   assert.equal((await rq("tNurman", "POST", `/quotations/${q.id}/approve`)).s, 403); // staf bukan reviewer
   assert.equal((await rq("tMgr", "POST", `/quotations/${q.id}/return`)).s, 400); // alasan wajib
   assert.equal((await rq("tMgr", "POST", `/quotations/${q.id}/return`, { note: "Diskon terlalu besar" })).d.status, "DRAFT");
+  const nfc = async (uid: string, type: string) => Number((await pool.query("SELECT count(*) n FROM crm_notifications WHERE user_id=$1 AND type=$2", [uid, type])).rows[0].n);
+  assert.equal(await nfc("u-mgr", "QUOTATION_SUBMITTED"), 1); assert.equal(await nfc("u-nurman", "QUOTATION_SUBMITTED"), 0); // reviewer diberi tahu, pengaju tidak
+  assert.equal(await nfc("u-nurman", "QUOTATION_RETURNED"), 1);
   await rq("tNurman", "POST", `/quotations/${q.id}/submit`);
   const ap = (await rq("tMgr", "POST", `/quotations/${q.id}/approve`)).d;
   assert.equal(ap.status, "APPROVED"); assert.equal(ap.approvedByName, "Manajer");
+  assert.equal(await nfc("u-nurman", "QUOTATION_APPROVED"), 1);
   const sent = (await rq("tNurman", "POST", `/quotations/${q.id}/send`)).d;
   assert.equal(sent.status, "SENT"); assert.ok(sent.sentAt); assert.equal(sent.lead.stage, "NEGOTIATION");
 
@@ -519,18 +523,36 @@ test("Review manager: komentar, Reviewed/Revision Required/Completed, aturan fol
   assert.equal((await rq("tMgr", "POST", `/reports/${rep.id}/return`)).s, 400); // catatan wajib
   const ret = await rq("tMgr", "POST", `/reports/${rep.id}/return`, { note: "Lengkapi counterpart" });
   assert.equal(ret.d.status, "REVISION_REQUIRED"); assert.equal(ret.d.comments.at(-1).kind, "REVISION_REQUIRED");
+  const nfr = async (uid: string, type: string) => Number((await pool.query("SELECT count(*) n FROM crm_notifications WHERE user_id=$1 AND type=$2", [uid, type])).rows[0].n);
+  assert.ok(await nfr("u-mgr", "REPORT_SUBMITTED") >= 1); assert.equal(await nfr("u-nurman", "REPORT_REVISION_REQUIRED"), 1);
   assert.equal((await rq("tNurman", "PUT", `/reports/${rep.id}`, { activityType: "MEETING", area: "Rev-Area", counterpart: "Pak RT", summary: "Rapat review" })).s, 200); // bisa diubah lagi
   assert.equal((await rq("tNurman", "POST", `/reports/${rep.id}/comments`, { note: "Sudah dilengkapi" })).s, 201); // pemilik boleh berkomentar
   assert.equal((await rq("tRasyad", "POST", `/reports/${rep.id}/comments`, { note: "x" })).s, 403); // bukan miliknya
   await rq("tNurman", "POST", `/reports/${rep.id}/submit`);
   assert.equal((await rq("tMgr", "POST", `/reports/${rep.id}/complete`)).s, 409); // harus Reviewed dulu
   await rq("tNurman", "POST", `/reports/${rep.id}/tasks`, { title: "Kirim proposal", picUserId: "u-nurman", dueDate: "2020-01-01" });
+  // follow-up untuk orang lain → PIC diberi tahu; pengingat terlambat lewat sweep (sekali per task)
+  const asg0 = await nfr("u-rasyad", "TASK_ASSIGNED");
+  await rq("tNurman", "POST", `/reports/${rep.id}/tasks`, { title: "Telepon ulang", picUserId: "u-rasyad", dueDate: "2020-01-02" });
+  assert.equal(await nfr("u-rasyad", "TASK_ASSIGNED"), asg0 + 1);
+  const { sweepNotifications } = await import("./notify.js");
+  await sweepNotifications(); await sweepNotifications(); // idempoten
+  const od = await nfr("u-nurman", "TASK_OVERDUE"); await sweepNotifications(); assert.equal(await nfr("u-nurman", "TASK_OVERDUE"), od); assert.ok(od >= 1 && await nfr("u-rasyad", "TASK_OVERDUE") >= 1);
+  // endpoint lonceng: hanya milik sendiri; tandai dibaca
+  const nl = await rq("tRasyad", "GET", "/notifications");
+  assert.ok(nl.d.unread >= 2); assert.ok(nl.d.items.every((x: any) => x.title));
+  assert.equal((await rq("tNurman", "GET", "/notifications")).d.items.some((x: any) => x.type === "TASK_ASSIGNED"), false);
+  assert.equal((await rq("tRasyad", "POST", "/notifications/read", { ids: [nl.d.items[0].id] })).d.marked, 1);
+  assert.equal((await rq("tRasyad", "GET", "/notifications")).d.unread, nl.d.unread - 1);
+  assert.equal((await rq("tNurman", "POST", "/notifications/read", { ids: [nl.d.items[1]?.id ?? 0] })).d.marked, 0); // tak bisa menandai milik orang lain
+  await rq("tRasyad", "POST", "/notifications/read"); assert.equal((await rq("tRasyad", "GET", "/notifications")).d.unread, 0);
   assert.equal((await rq("tMgr", "POST", `/reports/${rep.id}/review`, { note: "OK" })).d.status, "REVIEWED");
   const blocked = await rq("tMgr", "POST", `/reports/${rep.id}/complete`);
   assert.equal(blocked.s, 409); assert.match(blocked.d.error, /follow-up/);
   const t = (await rq("tNurman", "GET", "/tasks")).d.find((x: any) => x.reportId == rep.id);
   assert.equal(t.overdue, true);
   await rq("tNurman", "PATCH", `/tasks/${t.id}`, { status: "DONE" });
+  for (const x of (await rq("tMgr", "GET", "/tasks")).d.filter((x: any) => x.reportId == rep.id && x.status === "OPEN")) await rq("tMgr", "PATCH", `/tasks/${x.id}`, { status: "DONE" }); // task tambahan uji notifikasi
   const done = await rq("tMgr", "POST", `/reports/${rep.id}/complete`);
   assert.equal(done.d.status, "COMPLETED");
   assert.deepEqual(done.d.comments.map((c: any) => c.kind), ["REVISION_REQUIRED", "COMMENT", "REVIEWED", "COMPLETED"]);

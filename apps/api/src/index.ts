@@ -3,6 +3,7 @@ import { startExpirySweep } from "./quotations.js";
 import { startWoSync } from "./woSync.js";
 import { startWoPush } from "./woPush.js";
 import { startAutoBackup } from "./autoBackup.js";
+import { startNotifySweep } from "./notify.js";
 import { migrate } from "./migrate.js";
 
 await migrate();
@@ -12,3 +13,4 @@ startWoSync();
 startExpirySweep();
 startWoPush();
 startAutoBackup();
+startNotifySweep();

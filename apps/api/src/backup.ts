@@ -189,7 +189,7 @@ async function firstLine(file: string) {
 /* ───────── Purge ───────── */
 export type PurgeScope = 1 | 2 | 3;
 // Urut anak → induk (aman terhadap FK). Pengaturan (crm_settings) dan akun Admin TIDAK pernah ikut terhapus.
-const S1 = ["field_report_comments", "field_tasks", "field_photos", "field_report_items", "field_report_pics", "field_reports", "quotation_events", "quotation_revisions", "quotation_lines", "quotations", "lead_events", "leads", "wo_outbox", "audit_log", "quotation_counters"];
+const S1 = ["field_report_comments", "field_tasks", "field_photos", "field_report_items", "field_report_pics", "field_reports", "quotation_events", "quotation_revisions", "quotation_lines", "quotations", "lead_events", "leads", "wo_outbox", "audit_log", "quotation_counters", "crm_notifications"];
 const S2 = ["wo_customers", "wo_subscriptions", "wo_work_orders", "wo_sync_state", "wo_packages", "wo_areas"];
 const S3 = ["catalog_items"];
 

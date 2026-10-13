@@ -1,3 +1,4 @@
+import { notify, reviewerIds } from "./notify.js";
 import express, { type NextFunction, type Request, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
@@ -211,6 +212,20 @@ export function createApp() {
     res.json(await syncStatus());
   }));
   // Kirim CRM → WO (katalog & penawaran): status antrean, coba lagi yang ditolak, jalankan sekarang.
+  // Notifikasi (lonceng): milik pengguna yang login.
+  r.get("/notifications", ah(async (req, res) => {
+    const uid = req.user!.id;
+    const items = (await pool.query(`SELECT id, type, title, body, href, created_at AS "createdAt", read_at AS "readAt" FROM crm_notifications WHERE user_id=$1 ORDER BY id DESC LIMIT 30`, [uid])).rows;
+    const unread = Number((await pool.query("SELECT count(*) n FROM crm_notifications WHERE user_id=$1 AND read_at IS NULL", [uid])).rows[0].n);
+    res.json({ unread, items });
+  }));
+  r.post("/notifications/read", ah(async (req, res) => {
+    const b = z.object({ ids: z.array(z.coerce.number().int()).max(100).optional() }).parse(req.body ?? {});
+    const r2 = b.ids
+      ? await pool.query("UPDATE crm_notifications SET read_at=now() WHERE user_id=$1 AND read_at IS NULL AND id = ANY($2)", [req.user!.id, b.ids])
+      : await pool.query("UPDATE crm_notifications SET read_at=now() WHERE user_id=$1 AND read_at IS NULL", [req.user!.id]);
+    res.json({ marked: r2.rowCount });
+  }));
   r.get("/wo-sync", ah(async (req, res) => {
     if (!isReviewer(req.user!)) throw fail(403, "Hanya reviewer/Admin");
     res.json(await outboxStatus());
@@ -375,6 +390,7 @@ export function createApp() {
     if (!row.summary?.trim()) throw fail(400, "Summary wajib diisi sebelum submit");
     await pool.query("UPDATE field_reports SET status='SUBMITTED', submitted_at=now(), updated_at=now() WHERE id=$1", [id]);
     await audit(u.id, "field_report", id, "SUBMIT", { status: row.status }, { status: "SUBMITTED" });
+    if (!row.is_demo) await notify(await reviewerIds(u.id), { type: "REPORT_SUBMITTED", title: `Report baru menunggu review: ${row.counterpart ?? row.account_name ?? `#${id}`}`, body: `Dari ${u.name}`, href: `/reports/${id}`, key: `rep-sub:${id}:${Date.now() >> 10}` });
     res.json(await detail(await loadReport(id, u)));
   }));
 
@@ -390,6 +406,7 @@ export function createApp() {
     const b = z.object({ note: z.string().trim().min(1, "Komentar kosong").max(1000) }).parse(req.body);
     await pool.query("INSERT INTO field_report_comments (report_id,kind,note,actor_id,actor_name) VALUES ($1,'COMMENT',$2,$3,$4)", [id, b.note, u.id, u.name]);
     await audit(u.id, "field_report", id, "COMMENT", null, { status: row.status });
+    if (!row.is_demo) await notify(row.created_by === u.id ? await reviewerIds(u.id) : [row.created_by], { type: "REPORT_COMMENT", title: `Komentar baru di report ${row.counterpart ?? row.account_name ?? `#${id}`}`, body: `${u.name}: ${b.note}`, href: `/reports/${id}` });
     res.status(201).json(await detail(await loadReport(id, u)));
   }));
   for (const key of Object.keys(REVIEW) as (keyof typeof REVIEW)[]) r.post(`/reports/:id/${key}`, ah(async (req, res) => {
@@ -412,13 +429,14 @@ export function createApp() {
       await audit(u.id, "field_report", id, key.toUpperCase(), { status: row.status }, { status: a.to }, c);
       await c.query("COMMIT");
     } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
+    if (!row.is_demo && row.created_by !== u.id) await notify([row.created_by], { type: `REPORT_${a.to}`, title: `Report ${row.counterpart ?? row.account_name ?? `#${id}`}: ${a.to === "REVISION_REQUIRED" ? "perlu revisi" : a.to === "REVIEWED" ? "sudah direview" : "selesai (Completed)"}`, body: b.note ? `${u.name}: ${b.note}` : `Oleh ${u.name}`, href: `/reports/${id}` });
     res.json(await detail(await loadReport(id, u)));
   }));
 
   // Follow-up task: wajib PIC & due date.
   r.post("/reports/:id/tasks", ah(async (req, res) => {
     const u = req.user!, id = idParam(req);
-    await loadReport(id, u);
+    const rep = await loadReport(id, u);
     const t = taskSchema.parse(req.body);
     const [pic] = await picsFor([t.picUserId]);
     const r = await pool.query(
@@ -426,6 +444,7 @@ export function createApp() {
       [id, t.title, pic.user_id, pic.name, t.dueDate, u.id, u.name],
     );
     await audit(u.id, "field_task", r.rows[0].id, "CREATE", null, t);
+    if (!rep.is_demo && t.picUserId !== u.id) await notify([t.picUserId], { type: "TASK_ASSIGNED", title: `Follow-up baru untuk Anda: ${t.title}`, body: `Tenggat ${t.dueDate} · dari ${u.name}`, href: `/reports/${id}`, key: `task-new:${r.rows[0].id}` });
     res.status(201).json({ id: r.rows[0].id });
   }));
 

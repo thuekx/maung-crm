@@ -44,3 +44,8 @@ Satu domain, satu login (Maung WO), CRM di jalur `/crm` pada VM yang sama; Caddy
 - Penawaran demo TIDAK PERNAH keluar ke WO, kecuali Admin asli memilihnya di Data & Backup → "Uji sambung ke WO" (ketik KIRIM UJI). Payload PUT quotation menambah `demo:true`; hasil di kolom `quotations.wo_test_*` (terpisah dari `wo_synced_*`), tidak lewat antrean.
 - Hapus data demo CRM = status uji ikut hilang; respons purge memuat `testSent` (jumlah yang pernah dikirim) — sisi WO dibersihkan lewat purge uji sambung WO.
 - Rekonsiliasi (GET /api/integrations/crm/quotations, baca-saja) ada di Data & Backup → "Rekonsiliasi CRM ↔ WO" (reconcile.ts): hilang di WO, status/revisi/total beda, hanya di WO, sisa demo di WO.
+
+## Notifikasi (lonceng)
+- Tabel `crm_notifications` (migrasi 013), API `GET /crm/api/notifications`, `POST /crm/api/notifications/read` ({ids?}); `notify.ts` (kegagalan tak pernah menggagalkan proses utama, dedupe_key mencegah ganda). Baris demo tidak menghasilkan notifikasi.
+- Pemicu: penawaran diajukan→reviewer; disetujui/dikembalikan→pemilik; report submit→reviewer; review/revisi/selesai→pembuat; komentar→pihak lain; follow-up baru→PIC. Sweep tiap jam: follow-up jatuh tempo/terlambat→PIC, penawaran SENT ≤3 hari kedaluwarsa→pemilik, antrean WO BLOCKED→Admin.
+- Belum ada: push Telegram/email dari CRM (butuh endpoint penerima di WO).
