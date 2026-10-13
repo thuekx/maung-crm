@@ -41,7 +41,7 @@ export default function Catalog() {
             <div><label className="lbl">Jenis</label>
               <select className="input" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}><option value="SERVICE">Jasa</option><option value="PRODUCT">Produk</option></select></div>
             <div><label className="lbl">Satuan (bulan, unit, titik…)</label><input className="input" value={f.unit} onChange={(e) => setF({ ...f, unit: e.target.value })} /></div>
-            <div><label className="lbl">Harga (Rp)</label><input className="input" inputMode="decimal" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></div>
+            <div><label className="lbl">Harga jual bawaan (Rp, opsional)</label><input className="input" inputMode="decimal" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></div>
             <div><label className="lbl">Keterangan</label><input className="input" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></div>
           </div>
           {msg && <p className="text-sm text-red-600">{msg}</p>}

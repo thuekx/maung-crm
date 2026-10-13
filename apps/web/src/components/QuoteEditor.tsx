@@ -5,7 +5,7 @@ import { calc, num, rupiah } from "@/lib/money";
 
 interface Line { catalogId: string; qty: string; unitPrice: string; note: string }
 
-const NEW_ITEM = { name: "", kind: "PRODUCT", unit: "unit", price: "" };
+const NEW_ITEM = { name: "", kind: "PRODUCT", unit: "unit" };
 
 export default function QuoteEditor({ q, catalog, banks, onSaved, onCatalog }: { q: any; catalog: any[]; banks: any[]; onSaved: () => Promise<void>; onCatalog: () => Promise<any[]> }) {
   const [h, setH] = useState({
@@ -43,9 +43,10 @@ export default function QuoteEditor({ q, catalog, banks, onSaved, onCatalog }: {
     if (!ni) return;
     setBusy(true); setErr("");
     try {
-      const r = await api<{ id: number }>("/catalog", { method: "POST", json: { name: ni.f.name.trim(), kind: ni.f.kind, unit: ni.f.unit.trim() || "unit", price: num(ni.f.price) } });
+      // Item baru hanya nama/jenis/satuan; harga diisi di "Harga satuan" baris (harga jual/sewa setelah konsultasi Procurement).
+      const r = await api<{ id: number }>("/catalog", { method: "POST", json: { name: ni.f.name.trim(), kind: ni.f.kind, unit: ni.f.unit.trim() || "unit", price: 0 } });
       await onCatalog();
-      setLine(ni.line, { catalogId: String(r.id), unitPrice: String(num(ni.f.price)) });
+      setLine(ni.line, { catalogId: String(r.id) });
       setNi(null);
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
@@ -80,12 +81,11 @@ export default function QuoteEditor({ q, catalog, banks, onSaved, onCatalog }: {
             </div>
             {ni?.line === i && (
               <div className="space-y-2 rounded-lg bg-slate-50 p-2 dark:bg-white/5">
-                <p className="text-xs text-slate-500">Belum ada di katalog? Buat di sini; item langsung tercatat di Katalog (reviewer dapat merapikannya nanti).</p>
+                <p className="text-xs text-slate-500">Belum ada di katalog? Buat di sini (cukup nama, jenis, satuan); item langsung tercatat di Katalog. Harga jual/sewa diisi di "Harga satuan" baris ini setelah konsultasi dengan Procurement.</p>
                 <input className="input" placeholder="Nama item (mis. Access Point EW1200)" value={ni.f.name} onChange={(e) => setNi({ ...ni, f: { ...ni.f, name: e.target.value } })} />
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <select className="input" aria-label="Jenis" value={ni.f.kind} onChange={(e) => setNi({ ...ni, f: { ...ni.f, kind: e.target.value } })}><option value="PRODUCT">Produk</option><option value="SERVICE">Jasa</option></select>
                   <input className="input" placeholder="Satuan" value={ni.f.unit} onChange={(e) => setNi({ ...ni, f: { ...ni.f, unit: e.target.value } })} />
-                  <input className="input" inputMode="decimal" placeholder="Harga" value={ni.f.price} onChange={(e) => setNi({ ...ni, f: { ...ni.f, price: e.target.value } })} />
                 </div>
                 <div className="flex gap-2"><button type="button" className="btn" disabled={busy || ni.f.name.trim().length < 2} onClick={createItem}>Simpan ke katalog &amp; pakai</button>
                   <button type="button" className="btn-ghost" onClick={() => setNi(null)}>Batal</button></div>
@@ -93,7 +93,7 @@ export default function QuoteEditor({ q, catalog, banks, onSaved, onCatalog }: {
             )}
             <div className="grid grid-cols-3 gap-2">
               <div><label className="lbl">Jumlah</label><input className="input" inputMode="decimal" value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} /></div>
-              <div><label className="lbl">Harga satuan</label><input className="input" inputMode="decimal" value={l.unitPrice} onChange={(e) => setLine(i, { unitPrice: e.target.value })} /></div>
+              <div><label className="lbl">Harga satuan (jual/sewa)</label><input className="input" inputMode="decimal" value={l.unitPrice} onChange={(e) => setLine(i, { unitPrice: e.target.value })} /></div>
               <div><label className="lbl">Jumlah (Rp)</label><div className="input bg-slate-50">{rupiah(num(l.qty) * num(l.unitPrice))}</div></div>
             </div>
             <div className="flex gap-2"><input className="input" placeholder="Catatan baris (opsional)" value={l.note} onChange={(e) => setLine(i, { note: e.target.value })} />
