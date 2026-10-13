@@ -24,6 +24,7 @@ export default function DataAdmin() {
   const [dq, setDq] = useState<any[]>([]);
   const [pick, setPick] = useState<number[]>([]);
   const [testConfirm, setTestConfirm] = useState("");
+  const [rc, setRc] = useState<any>(null);
   const [out, setOut] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = useCallback(() => Promise.all([api("/admin/data/overview"), api("/admin/data/demo-quotations")]).then(([x, y]) => { setD(x); setDq(y.items); setPick((p) => p.filter((id) => y.items.some((i: any) => i.id === id))); setErr(""); }).catch((e) => setErr(e.message)), []);
@@ -88,6 +89,7 @@ export default function DataAdmin() {
         <h2 className="flex items-center gap-2 text-sm font-semibold text-red-700 dark:text-red-400"><Icon name="trash" size={16} />Purge data (hapus data uji)</h2>
         <p className="text-sm text-slate-500">Untuk membersihkan data percobaan. <b>Akun Admin Anda dan pengaturan CRM tidak pernah terhapus.</b> Sebelum menghapus, backup otomatis dibuat (bisa di-restore dari daftar di atas).</p>
         <div className="grid gap-2 sm:grid-cols-2">
+          {dq.some((x) => x.testAt) && <p className="rounded-xl bg-amber-100 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">Ada penawaran demo yang pernah dikirim sebagai <b>uji sambung ke WO</b>. Menghapus data di CRM <b>tidak</b> menghapus datanya di WO — bersihkan terpisah lewat Pusat Admin → Work Order → Data & Backup → "Hapus data uji sambung".</p>}
           {[{ v: true, t: "Hanya data demo", d: "Hapus baris bertanda demo saja. Data nyata tidak tersentuh." }, { v: false, t: "Semua data (menurut cakupan)", d: "Hapus data nyata dan demo sesuai cakupan di bawah." }].map((m) => (
             <label key={String(m.v)} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm ${purge.onlyDemo === m.v ? "border-red-300 bg-red-50 dark:border-red-400/40 dark:bg-red-500/10" : "border-slate-200 dark:border-white/10"}`}>
               <input type="radio" className="mt-1" checked={purge.onlyDemo === m.v} onChange={() => setPurge({ ...purge, onlyDemo: m.v })} /><span><b>{m.t}</b><br /><span className="text-xs text-slate-500">{m.d}</span></span>
@@ -109,7 +111,7 @@ export default function DataAdmin() {
           <button className="btn-danger" disabled={!!busy || purge.confirm !== "HAPUS DATA"} onClick={() => run("purge", async () => {
             const r = await api("/admin/data/purge", { method: "POST", json: purge });
             setPurge({ ...purge, confirm: "" });
-            return `Selesai: ${Object.values(r.deleted as Record<string, number>).reduce((a, b) => a + b, 0)} baris dihapus${r.removedFiles ? `, ${r.removedFiles} berkas foto` : ""}${r.backup ? ` · backup: ${r.backup}` : ""}`;
+            return `Selesai: ${Object.values(r.deleted as Record<string, number>).reduce((a, b) => a + b, 0)} baris dihapus${r.removedFiles ? `, ${r.removedFiles} berkas foto` : ""}${r.backup ? ` · backup: ${r.backup}` : ""}${r.testSent > 0 ? ` · PERHATIAN: ${r.testSent} penawaran pernah dikirim sebagai uji sambung — data ujinya di WO TIDAK ikut terhapus; bersihkan terpisah di Pusat Admin → Work Order → Data & Backup → \"Hapus data uji sambung\".` : ""}`;
           })}>{busy === "purge" ? "Menghapus…" : purge.onlyDemo ? "Hapus data demo" : "Hapus data"}</button>
         </div>
       </section>
@@ -151,6 +153,27 @@ export default function DataAdmin() {
           </div>
         </Section>
       )}
+
+      <Section icon="sync" title="Rekonsiliasi CRM ↔ WO">
+        <p className="text-sm text-slate-500">Membandingkan penawaran di CRM dengan yang tercatat di WO (baca-saja, tidak mengubah apa pun): yang ada di CRM tapi tidak di WO, status/revisi/total yang berbeda, dan sisa data demo/uji sambung di WO.</p>
+        <div><button className="btn-ghost" disabled={!!busy} onClick={() => run("rc", async () => { const r = await api("/admin/data/reconcile"); setRc(r); return r.ok ? `Cocok: ${r.matched} penawaran sama persis, tidak ada selisih.` : `Selesai diperiksa: ${r.missingInWo.length} tidak ada di WO, ${r.mismatched.length} berbeda, ${r.onlyInWo.length} hanya di WO.`; })}>{busy === "rc" ? "Memeriksa…" : "Periksa rekonsiliasi"}</button></div>
+        {rc && (
+          <div className="space-y-3 text-sm">
+            <p className="text-xs text-slate-500">Diperiksa {fmtDate(rc.checkedAt)} · {rc.woCount} penawaran di WO · {rc.matched} cocok</p>
+            {[
+              { t: "Ada di CRM, tidak ada di WO", rows: rc.missingInWo, f: (x: any) => `${x.number} (${x.crmStatus})${x.demo ? " [demo]" : ""} — ${x.note}` },
+              { t: "Status / revisi / total berbeda", rows: rc.mismatched, f: (x: any) => `${x.number}${x.demo ? " [demo]" : ""}${x.queued ? " (menunggu kirim)" : ""} — ${x.problems.join("; ")}` },
+              { t: "Hanya ada di WO (tidak dikenal CRM)", rows: rc.onlyInWo, f: (x: any) => `${x.number} (${x.status}, ${x.total})${x.woNumber ? ` · ${x.woNumber}` : ""}` },
+              { t: "Data demo / uji sambung di WO", rows: rc.demoInWo, f: (x: any) => `${x.number} (${x.status})${x.woNumber ? ` · ${x.woNumber}` : ""} — ${x.inCrm ? "masih ada di CRM" : "tidak ada di CRM (sisa; bersihkan lewat purge uji sambung di WO)"}` },
+            ].map((g) => (
+              <div key={g.t}>
+                <div className="font-semibold">{g.t} <Badge tone={g.rows.length ? "amber" : "green"}>{g.rows.length}</Badge></div>
+                {g.rows.length > 0 && <ul className="mt-1 list-disc space-y-0.5 pl-5 text-slate-600 dark:text-slate-300">{g.rows.slice(0, 50).map((x: any) => <li key={x.crmId}>{g.f(x)}</li>)}{g.rows.length > 50 && <li>…dan {g.rows.length - 50} lainnya</li>}</ul>}
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
 
       {restore && (
         <Modal title="Restore dari backup" onClose={() => setRestore(null)}>

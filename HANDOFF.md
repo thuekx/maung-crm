@@ -43,4 +43,4 @@ Satu domain, satu login (Maung WO), CRM di jalur `/crm` pada VM yang sama; Caddy
 ## Uji sambung CRM→WO (demo:true)
 - Penawaran demo TIDAK PERNAH keluar ke WO, kecuali Admin asli memilihnya di Data & Backup → "Uji sambung ke WO" (ketik KIRIM UJI). Payload PUT quotation menambah `demo:true`; hasil di kolom `quotations.wo_test_*` (terpisah dari `wo_synced_*`), tidak lewat antrean.
 - Hapus data demo CRM = status uji ikut hilang; respons purge memuat `testSent` (jumlah yang pernah dikirim) — sisi WO dibersihkan lewat purge uji sambung WO.
-- Belum dikerjakan: rekonsiliasi (GET /api/integrations/crm/quotations) — menunggu commit WO.
+- Rekonsiliasi (GET /api/integrations/crm/quotations, baca-saja) ada di Data & Backup → "Rekonsiliasi CRM ↔ WO" (reconcile.ts): hilang di WO, status/revisi/total beda, hanya di WO, sisa demo di WO.

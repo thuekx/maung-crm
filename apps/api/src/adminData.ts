@@ -9,6 +9,7 @@ import { backupDir, createBackup, listBackups, overview, purgeData, readMeta, re
 import { loadDemo } from "./demo.js";
 import { getSetting, putSetting } from "./settings.js";
 import { outboxStatus, sendTestQuotation } from "./woPush.js";
+import { reconcile } from "./reconcile.js";
 
 const fail = (status: number, error: string) => Object.assign(new Error(error), { status });
 const ah = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
@@ -116,7 +117,7 @@ adminRoutes.post("/admin/data/purge", ah(async (req, res) => {
   let pre: string | null = null;
   if (b.backupFirst) pre = (await createBackup({ kind: "pre-purge", note: b.onlyDemo ? "sebelum hapus data demo" : `sebelum purge cakupan ${b.scope}`, by: req.user!.name })).name;
   try {
-    const testSent = b.onlyDemo ? Number((await pool.query("SELECT count(*) n FROM quotations WHERE is_demo AND wo_test_at IS NOT NULL")).rows[0].n) : 0;
+    const testSent = Number((await pool.query("SELECT count(*) n FROM quotations WHERE wo_test_at IS NOT NULL")).rows[0].n);
     const r = await purgeData({ scope: b.scope, onlyDemo: b.onlyDemo, deleteUsers: b.deleteUsers, deleteFiles: b.deleteFiles, keepAdminId: req.user!.id });
     if (!b.onlyDemo) await pool.query("DELETE FROM crm_settings WHERE key='demo'");
     else if (!Number((await overview(pool)).demo.leads) && !Number((await overview(pool)).demo.reports)) await pool.query("DELETE FROM crm_settings WHERE key='demo'");
@@ -144,6 +145,9 @@ adminRoutes.post("/admin/data/demo-quotations/send-test", ah(async (req, res) =>
   await aud(req, `Uji sambung ke WO: ${results.filter((r) => r.ok).length}/${results.length} penawaran demo dikirim (demo:true)`);
   res.json({ results });
 }));
+
+/* ── Rekonsiliasi CRM ↔ WO (baca-saja) ── */
+adminRoutes.get("/admin/data/reconcile", ah(async (_req, res) => { res.json(await reconcile()); }));
 
 /** Muat data demo: memakai akun demo WO (mkt@ …) + Admin; baris ditandai is_demo; tidak pernah dikirim ke WO. */
 adminRoutes.post("/admin/data/demo", ah(async (req, res) => {

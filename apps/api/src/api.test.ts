@@ -33,6 +33,11 @@ const crmMock = (req: http.IncomingMessage, res: http.ServerResponse) => {
     const send = (st: number, o: any) => { res.statusCode = st; res.setHeader("content-type", "application/json"); res.end(JSON.stringify(o)); };
     if (req.headers["x-api-key"] !== CRM_KEY) return send(401, { error: "API key tidak valid" });
     const body = raw ? JSON.parse(raw) : {};
+    if (req.method === "GET" && req.url!.startsWith("/api/integrations/crm/quotations?")) { // daftar rekonsiliasi (baca-saja)
+      const all = [...woQuotes.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([crmId, b]) => ({ crmId, number: b.number, rev: b.rev, status: b.status, total: b.total, demo: !!b.demo, marketingUserId: b.marketingUserId, marketingName: b.marketingName, customerCode: null, lineCount: b.lines.length, woNumber: b.woNumber ?? null, woStatus: null, updatedAt: new Date().toISOString() }));
+      const cur = new URL(req.url!, "http://x").searchParams.get("cursor"); const st = cur ? all.findIndex((x) => x.crmId === cur) + 1 : 0;
+      return send(200, { count: Math.min(2, all.length - st), nextCursor: st + 2 < all.length ? all[st + 1].crmId : null, generatedAt: new Date().toISOString(), data: all.slice(st, st + 2) });
+    }
     const [, kind, crmId] = /^\/api\/integrations\/crm\/(catalog|quotations)\/([^/?]+)/.exec(req.url!) ?? [];
     woCalls.push({ method: req.method!, path: `${kind}/${crmId}`, body });
     if (woMode === "down") return send(503, { error: "layanan sibuk" });
@@ -879,6 +884,26 @@ test("Admin CRM: Data & Backup (backup/restore/upload/hapus), purge 3 tingkat + 
   assert.equal(badSend.d.results[0].ok, false); assert.match((await q1("SELECT wo_test_error FROM quotations WHERE id=$1", [dSent.id]))[0].wo_test_error, /503/); woMode = "ok";
   // pengiriman nyata biasa tidak membawa demo:true
   assert.ok(!woCalls.some((c) => c.body?.demo === true && c.path !== `quotations/quotation-${dSent.id}`));
+
+  // ── rekonsiliasi baca-saja ──
+  assert.equal((await rq("tNurman", "GET", "/admin/data/reconcile")).s, 403);
+  const key = `quotation-${dSent.id}`;
+  woQuotes.set("quotation-9999", { number: "QT-X", rev: 1, status: "QUOTED", total: 5, demo: false, marketingUserId: "u", marketingName: "n", lines: [{}] }); // ada di WO, tak ada di CRM
+  woQuotes.set("quotation-9998", { number: "QT-D", rev: 1, status: "QUOTED", total: 5, demo: true, marketingUserId: "u", marketingName: "n", lines: [{}] }); // sisa demo yatim di WO
+  woCalls.length = 0;
+  let rc = (await rq("tAdmin", "GET", "/admin/data/reconcile")).d;
+  assert.equal(woCalls.filter((c) => c.method !== "GET").length, 0); // pembacaan tidak menulis ke WO
+  assert.ok(rc.woCount >= 3); assert.ok(rc.onlyInWo.some((x: any) => x.crmId === "quotation-9999"));
+  assert.ok(rc.demoInWo.some((x: any) => x.crmId === key && x.inCrm === true)); assert.ok(rc.demoInWo.some((x: any) => x.crmId === "quotation-9998" && x.inCrm === false));
+  assert.equal(rc.ok, false);
+  woQuotes.get(key).total = 1; woQuotes.get(key).status = "WON";
+  rc = (await rq("tAdmin", "GET", "/admin/data/reconcile")).d;
+  const mm = rc.mismatched.find((x: any) => x.crmId === key); assert.ok(mm && mm.problems.length >= 2);
+  woQuotes.delete(key);
+  rc = (await rq("tAdmin", "GET", "/admin/data/reconcile")).d;
+  assert.ok(rc.missingInWo.some((x: any) => x.crmId === key && x.demo === true));
+  woQuotes.delete("quotation-9999"); woQuotes.delete("quotation-9998");
+  delete process.env.CRM_INTEGRATION_KEY; assert.equal((await rq("tAdmin", "GET", "/admin/data/reconcile")).s, 400); process.env.CRM_INTEGRATION_KEY = CRM_KEY;
 
   // ── purge hanya demo: data nyata utuh ──
   const real = { leads: (await q1("SELECT count(*)::int n FROM leads WHERE NOT is_demo"))[0].n, quotes: (await q1("SELECT count(*)::int n FROM quotations WHERE NOT is_demo"))[0].n, cat: (await q1("SELECT count(*)::int n FROM catalog_items WHERE NOT is_demo"))[0].n };
