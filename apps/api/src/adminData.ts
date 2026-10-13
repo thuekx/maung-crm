@@ -8,7 +8,7 @@ import { requireRealAdmin } from "./auth.js";
 import { backupDir, createBackup, listBackups, overview, purgeData, readMeta, restoreBackup, safeName } from "./backup.js";
 import { loadDemo } from "./demo.js";
 import { getSetting, putSetting } from "./settings.js";
-import { outboxStatus } from "./woPush.js";
+import { outboxStatus, sendTestQuotation } from "./woPush.js";
 
 const fail = (status: number, error: string) => Object.assign(new Error(error), { status });
 const ah = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
@@ -116,12 +116,33 @@ adminRoutes.post("/admin/data/purge", ah(async (req, res) => {
   let pre: string | null = null;
   if (b.backupFirst) pre = (await createBackup({ kind: "pre-purge", note: b.onlyDemo ? "sebelum hapus data demo" : `sebelum purge cakupan ${b.scope}`, by: req.user!.name })).name;
   try {
+    const testSent = b.onlyDemo ? Number((await pool.query("SELECT count(*) n FROM quotations WHERE is_demo AND wo_test_at IS NOT NULL")).rows[0].n) : 0;
     const r = await purgeData({ scope: b.scope, onlyDemo: b.onlyDemo, deleteUsers: b.deleteUsers, deleteFiles: b.deleteFiles, keepAdminId: req.user!.id });
     if (!b.onlyDemo) await pool.query("DELETE FROM crm_settings WHERE key='demo'");
     else if (!Number((await overview(pool)).demo.leads) && !Number((await overview(pool)).demo.reports)) await pool.query("DELETE FROM crm_settings WHERE key='demo'");
     await aud(req, b.onlyDemo ? `Data demo dihapus${pre ? ` (backup: ${pre})` : ""}` : `Purge data cakupan ${b.scope}${b.deleteUsers ? " + cache akun non-admin" : ""}${pre ? ` (backup: ${pre})` : ""}`);
-    res.json({ ...r, backup: pre });
+    res.json({ ...r, backup: pre, testSent }); // testSent: penawaran demo yang pernah dikirim uji sambung — sisi WO perlu dibersihkan lewat purge uji sambung WO
   } catch (e) { throw fail(400, `Purge gagal (data tidak diubah): ${(e as Error).message}`); }
+}));
+
+/* ── Uji sambung CRM→WO: penawaran demo yang dikirim dengan demo:true (hanya lewat aksi eksplisit ini) ── */
+adminRoutes.get("/admin/data/demo-quotations", ah(async (_req, res) => {
+  const r = await pool.query(
+    `SELECT id, number, rev, status, customer_name AS "customerName", subject, wo_test_at AS "testAt", wo_test_rev AS "testRev", wo_test_status AS "testStatus", wo_test_number AS "testNumber", wo_test_error AS "testError",
+            (SELECT COALESCE(sum(qty*unit_price),0) FROM quotation_lines l WHERE l.quotation_id=quotations.id) AS subtotal
+       FROM quotations WHERE is_demo AND deleted_at IS NULL ORDER BY id`);
+  res.json({ items: r.rows.map((x) => ({ ...x, subtotal: Number(x.subtotal), sendable: ["SENT", "ACCEPTED", "REJECTED", "EXPIRED", "CANCELLED"].includes(x.status) })) });
+}));
+adminRoutes.post("/admin/data/demo-quotations/send-test", ah(async (req, res) => {
+  const b = z.object({ ids: z.array(z.coerce.number().int().positive()).min(1).max(20), confirm: z.string() }).parse(req.body);
+  if (b.confirm !== "KIRIM UJI") throw fail(400, "Ketik KIRIM UJI untuk konfirmasi");
+  const results: { id: number; ok: boolean; message: string }[] = [];
+  for (const id of b.ids) {
+    try { results.push({ id, ...(await sendTestQuotation(id)) }); }
+    catch (e) { results.push({ id, ok: false, message: (e as Error).message }); }
+  }
+  await aud(req, `Uji sambung ke WO: ${results.filter((r) => r.ok).length}/${results.length} penawaran demo dikirim (demo:true)`);
+  res.json({ results });
 }));
 
 /** Muat data demo: memakai akun demo WO (mkt@ …) + Admin; baris ditandai is_demo; tidak pernah dikirim ke WO. */

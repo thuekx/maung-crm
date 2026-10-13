@@ -38,7 +38,7 @@ export function woCustomerProblems(q: { customerName?: string | null; customerPh
  * diambil dari kolom permanen penawaran, bukan dari data pengguna WO saat ini (yang bisa nonaktif/berganti peran/dihapus).
  * Mengembalikan null bila status tidak perlu dikirim ke WO. `crmId` ada di URL (bukan badan).
  */
-export function quotationWoPayload(q: Q, extra: { areaCode?: string | null } = {}) {
+export function quotationWoPayload(q: Q, extra: { areaCode?: string | null; demo?: boolean } = {}) {
   const status = WO_STATUS[q.status];
   if (!status) return null;
   if (!q.marketingUserId || !q.marketingName) throw new Error(`Penawaran ${q.number}: jejak marketing (id + nama) hilang — tidak dikirim`);
@@ -47,6 +47,7 @@ export function quotationWoPayload(q: Q, extra: { areaCode?: string | null } = {
   const email = q.customerEmail?.trim() || undefined;
   return {
     number: q.number, rev: q.rev, status,
+    ...(extra.demo ? { demo: true as const } : {}), // uji sambung: WO menandai pelanggan/order/PR sebagai uji dan menahan pengiriman keluarnya
     validUntil: q.validUntil ?? undefined, sentAt: q.sentAt ?? undefined, decidedAt: q.decidedAt ?? undefined,
     lostReason: status === "LOST" ? (q.decisionNote ?? (q.status === "EXPIRED" ? "Masa berlaku berakhir" : undefined)) : undefined,
     marketingUserId: q.marketingUserId, marketingName: q.marketingName,

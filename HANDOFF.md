@@ -39,3 +39,8 @@ Keputusan terbuka untuk pemilik: lokasi object storage (MinIO/Garage vs volume),
 ## Arsitektur terbaru (menggantikan "CRM berdiri sendiri")
 Satu domain, satu login (Maung WO), CRM di jalur `/crm` pada VM yang sama; Caddy milik WO; `crm-web`/`crm-api` di jaringan `maung_edge`; API CRM di `/crm/api` (port 4000); token = `maung_token`; akses = fitur WO `app.crm` + cakupan peran; data pelanggan lewat Export API WO (cermin baca-saja). Detail dan tahap: `docs/RENCANA-INTEGRASI-WO.md`; kontrak sisi WO: `docs/maung-crm/INTEGRASI-WO.md` di repo Maung-Wo-Inv. Satu repo satu penulis: sesi CRM hanya menulis di repo ini.
 
+
+## Uji sambung CRM→WO (demo:true)
+- Penawaran demo TIDAK PERNAH keluar ke WO, kecuali Admin asli memilihnya di Data & Backup → "Uji sambung ke WO" (ketik KIRIM UJI). Payload PUT quotation menambah `demo:true`; hasil di kolom `quotations.wo_test_*` (terpisah dari `wo_synced_*`), tidak lewat antrean.
+- Hapus data demo CRM = status uji ikut hilang; respons purge memuat `testSent` (jumlah yang pernah dikirim) — sisi WO dibersihkan lewat purge uji sambung WO.
+- Belum dikerjakan: rekonsiliasi (GET /api/integrations/crm/quotations) — menunggu commit WO.

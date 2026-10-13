@@ -21,9 +21,12 @@ export default function DataAdmin() {
   const [restore, setRestore] = useState<any>(null);
   const [purge, setPurge] = useState({ onlyDemo: false, scope: 1, deleteUsers: false, deleteFiles: false, backupFirst: true, confirm: "" });
   const [demoConfirm, setDemoConfirm] = useState("");
+  const [dq, setDq] = useState<any[]>([]);
+  const [pick, setPick] = useState<number[]>([]);
+  const [testConfirm, setTestConfirm] = useState("");
   const [out, setOut] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const load = useCallback(() => api("/admin/data/overview").then((x) => { setD(x); setErr(""); }).catch((e) => setErr(e.message)), []);
+  const load = useCallback(() => Promise.all([api("/admin/data/overview"), api("/admin/data/demo-quotations")]).then(([x, y]) => { setD(x); setDq(y.items); setPick((p) => p.filter((id) => y.items.some((i: any) => i.id === id))); setErr(""); }).catch((e) => setErr(e.message)), []);
   useEffect(() => { load(); }, [load]);
   if (err) return <div className="space-y-4"><PageHeader icon="layers" title="Data & Backup CRM" /><p className="card text-sm text-red-600">{err}</p></div>;
   if (!d) return <p>Memuat…</p>;
@@ -122,6 +125,32 @@ export default function DataAdmin() {
           })}>{busy === "demo" ? "Memuat…" : "Muat data demo"}</button>
         </div>
       </Section>
+
+      {dq.length > 0 && (
+        <Section icon="send" title="Uji sambung ke WO">
+          <p className="text-sm text-slate-500">Penawaran demo <b>tidak pernah</b> dikirim ke WO kecuali lewat aksi ini. Yang dipilih dikirim dengan penanda <code>demo:true</code>: WO menandainya sebagai <b>uji sambung</b> (pelanggan/order/PR), menahan semua pengiriman keluarnya, dan menyediakan pembersihan terarah. Hanya penawaran berstatus Terkirim/Diterima/Ditolak/Kedaluwarsa/Batal yang bisa dikirim. Menghapus data demo CRM juga menghapus status uji ini — <b>bersihkan sisi WO lewat menu uji sambung di WO</b>.</p>
+          <ul className="divide-y divide-slate-100 text-sm dark:divide-white/10">
+            {dq.map((x) => (
+              <li key={x.id} className="flex flex-wrap items-center gap-2 py-2">
+                <input type="checkbox" disabled={!x.sendable} checked={pick.includes(x.id)} onChange={(e) => setPick(e.target.checked ? [...pick, x.id] : pick.filter((i) => i !== x.id))} aria-label={`Pilih ${x.number}`} />
+                <span className="font-medium">{x.number}</span><Badge>{x.status}</Badge>
+                <span className="min-w-0 flex-1 truncate text-slate-500">{x.customerName}</span>
+                {x.testAt && !x.testError && <span className="text-xs text-emerald-600">terkirim {fmtDate(x.testAt)} sebagai {x.testStatus}{x.testNumber ? ` · ${x.testNumber}` : ""}{x.testRev !== x.rev ? " · revisi berubah sejak itu" : ""}</span>}
+                {x.testError && <span className="text-xs text-red-600">gagal: {x.testError}</span>}
+                {!x.sendable && <span className="text-xs text-slate-400">belum bisa dikirim</span>}
+              </li>
+            ))}
+          </ul>
+          <div className="flex flex-wrap items-center gap-2">
+            <input className="input w-56" placeholder="ketik: KIRIM UJI" value={testConfirm} onChange={(e) => setTestConfirm(e.target.value)} />
+            <button className="btn-ghost" disabled={!!busy || !pick.length || testConfirm !== "KIRIM UJI"} onClick={() => run("test", async () => {
+              const r = await api("/admin/data/demo-quotations/send-test", { method: "POST", json: { ids: pick, confirm: testConfirm } });
+              setTestConfirm(""); setPick([]);
+              return r.results.map((x: any) => x.message).join(" · ");
+            })}>{busy === "test" ? "Mengirim…" : `Kirim sebagai uji sambung (${pick.length})`}</button>
+          </div>
+        </Section>
+      )}
 
       {restore && (
         <Modal title="Restore dari backup" onClose={() => setRestore(null)}>

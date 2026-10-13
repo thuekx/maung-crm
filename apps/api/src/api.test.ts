@@ -857,11 +857,34 @@ test("Admin CRM: Data & Backup (backup/restore/upload/hapus), purge 3 tingkat + 
   const { refreshLeadLinks } = await import("./leads.js"); await refreshLeadLinks();
   assert.equal((await q1("SELECT count(*)::int n FROM leads WHERE is_demo AND customer_code IS NOT NULL"))[0].n, 0);
 
+  // ── uji sambung: penawaran demo dikirim ke WO HANYA lewat aksi eksplisit, dengan demo:true ──
+  const dqs = (await rq("tAdmin", "GET", "/admin/data/demo-quotations")).d.items;
+  assert.equal(dqs.length, 9); assert.ok(dqs.find((x: any) => x.status === "DRAFT").sendable === false);
+  const dSent = dqs.find((x: any) => x.status === "SENT"), dDraft = dqs.find((x: any) => x.status === "DRAFT");
+  const realQ = (await q1("SELECT id FROM quotations WHERE NOT is_demo LIMIT 1"))[0].id;
+  assert.equal((await rq("tAdmin", "POST", "/admin/data/demo-quotations/send-test", { ids: [dSent.id], confirm: "kirim uji" })).s, 400);
+  assert.equal((await rq("tNurman", "POST", "/admin/data/demo-quotations/send-test", { ids: [dSent.id], confirm: "KIRIM UJI" })).s, 403);
+  woCalls.length = 0;
+  const outboxBefore = (await q1("SELECT count(*)::int n FROM wo_outbox"))[0].n;
+  const tst = await rq("tAdmin", "POST", "/admin/data/demo-quotations/send-test", { ids: [dSent.id, dDraft.id, realQ], confirm: "KIRIM UJI" });
+  assert.equal(tst.s, 200);
+  const byId = Object.fromEntries(tst.d.results.map((r: any) => [r.id, r]));
+  assert.equal(byId[dSent.id].ok, true, byId[dSent.id].message); assert.equal(byId[dDraft.id].ok, false); assert.equal(byId[realQ].ok, false);
+  assert.equal(woCalls.length, 1); assert.equal(woCalls[0].body.demo, true); assert.ok(woCalls[0].body.marketingUserId && woCalls[0].body.marketingName); // jejak tetap wajib
+  assert.equal((await q1("SELECT wo_test_status FROM quotations WHERE id=$1", [dSent.id]))[0].wo_test_status, "QUOTED");
+  assert.equal((await q1("SELECT wo_synced_at FROM quotations WHERE id=$1", [dSent.id]))[0].wo_synced_at, null); // status kirim nyata tak tersentuh
+  assert.equal((await q1("SELECT count(*)::int n FROM wo_outbox"))[0].n, outboxBefore); // tidak lewat antrean
+  woMode = "down"; woCalls.length = 0;
+  const badSend = await rq("tAdmin", "POST", "/admin/data/demo-quotations/send-test", { ids: [dSent.id], confirm: "KIRIM UJI" });
+  assert.equal(badSend.d.results[0].ok, false); assert.match((await q1("SELECT wo_test_error FROM quotations WHERE id=$1", [dSent.id]))[0].wo_test_error, /503/); woMode = "ok";
+  // pengiriman nyata biasa tidak membawa demo:true
+  assert.ok(!woCalls.some((c) => c.body?.demo === true && c.path !== `quotations/quotation-${dSent.id}`));
+
   // ── purge hanya demo: data nyata utuh ──
   const real = { leads: (await q1("SELECT count(*)::int n FROM leads WHERE NOT is_demo"))[0].n, quotes: (await q1("SELECT count(*)::int n FROM quotations WHERE NOT is_demo"))[0].n, cat: (await q1("SELECT count(*)::int n FROM catalog_items WHERE NOT is_demo"))[0].n };
   assert.equal((await rq("tAdmin", "POST", "/admin/data/purge", { onlyDemo: true, confirm: "hapus data" })).s, 400);
   const pd = await rq("tAdmin", "POST", "/admin/data/purge", { onlyDemo: true, confirm: "HAPUS DATA" });
-  assert.equal(pd.s, 200); assert.match(pd.d.backup, /^crm-pre-purge-/);
+  assert.equal(pd.s, 200); assert.match(pd.d.backup, /^crm-pre-purge-/); assert.equal(pd.d.testSent, 1); // pemilik diingatkan: ada penawaran uji sambung di WO
   assert.deepEqual(await q1("SELECT (SELECT count(*)::int FROM leads WHERE is_demo) a, (SELECT count(*)::int FROM quotations WHERE is_demo) b, (SELECT count(*)::int FROM field_reports WHERE is_demo) c, (SELECT count(*)::int FROM catalog_items WHERE is_demo) d, (SELECT count(*)::int FROM field_report_comments WHERE report_id NOT IN (SELECT id FROM field_reports)) e"), [{ a: 0, b: 0, c: 0, d: 0, e: 0 }]);
   assert.deepEqual([(await q1("SELECT count(*)::int n FROM leads"))[0].n, (await q1("SELECT count(*)::int n FROM quotations"))[0].n, (await q1("SELECT count(*)::int n FROM catalog_items"))[0].n], [real.leads, real.quotes, real.cat]);
   assert.equal((await rq("tAdmin", "GET", "/dashboard")).d.hasDemo, false);

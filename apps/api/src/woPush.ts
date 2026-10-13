@@ -104,6 +104,32 @@ async function pushQuotation(id: number) {
   return { http: r.http, data: r.data };
 }
 
+/**
+ * UJI SAMBUNG (aksi eksplisit Admin): kirim satu penawaran DEMO ke WO dengan `demo:true`. Tidak lewat antrean, tidak mengubah wo_synced_*,
+ * dan penawaran demo yang tidak dikirim lewat aksi ini tetap tidak pernah keluar. Hasil disimpan di kolom wo_test_*.
+ */
+export async function sendTestQuotation(id: number): Promise<{ ok: boolean; message: string; woNumber?: string | null }> {
+  if (!pushEnabled()) throw new PushError(null, "Kirim ke WO nonaktif (CRM_INTEGRATION_KEY kosong atau WO_SYNC_ENABLED=0)", true);
+  const row = (await pool.query("SELECT * FROM quotations WHERE id=$1 AND deleted_at IS NULL", [id])).rows[0];
+  if (!row) throw new PushError(404, "Penawaran tidak ditemukan", true);
+  if (!row.is_demo) throw new PushError(400, "Hanya penawaran demo yang boleh dikirim sebagai uji sambung", true);
+  const q = await detail(row);
+  const areaName = (await pool.query("SELECT area FROM leads WHERE id=$1", [row.lead_id])).rows[0]?.area;
+  const areaCode = areaName ? (await pool.query("SELECT code FROM wo_areas WHERE lower(name)=lower($1) AND code IS NOT NULL", [areaName])).rows[0]?.code ?? null : null;
+  let payload: ReturnType<typeof quotationWoPayload>;
+  try { payload = quotationWoPayload(q, { areaCode, demo: true }); } catch (e) { throw new PushError(400, (e as Error).message, true); }
+  if (!payload) throw new PushError(400, `Status ${q.status} tidak dikirim ke WO (hanya SENT, ACCEPTED, REJECTED, EXPIRED, CANCELLED)`, true);
+  try {
+    const r = await put(`quotations/${quotationCrmId(id)}`, payload);
+    const no = r.data?.woNumber ?? null;
+    await pool.query("UPDATE quotations SET wo_test_at=now(), wo_test_rev=$2, wo_test_status=$3, wo_test_number=COALESCE($4, wo_test_number), wo_test_error=NULL WHERE id=$1", [id, payload.rev, payload.status, no]);
+    return { ok: true, message: `${q.number}: terkirim sebagai ${payload.status}${no ? ` (order ${no})` : ""}`, woNumber: no };
+  } catch (e) {
+    if (e instanceof PushError) { await pool.query("UPDATE quotations SET wo_test_error=$2 WHERE id=$1", [id, e.message]); return { ok: false, message: `${q.number}: ${e.message}` }; }
+    throw e;
+  }
+}
+
 const backoffMin = (attempts: number) => Math.min(60, 2 ** Math.min(attempts, 6)); // 1,2,4,8,16,32,60 menit
 
 let running = false;
