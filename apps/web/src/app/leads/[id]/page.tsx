@@ -82,6 +82,11 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
       </div>
 
       <Section icon="link" title="Pelanggan di WO">
+        {l.relatedCustomer && (
+          <p className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
+            Layanan {l.kind === "INTERNET" ? "internet baru" : "tambahan"} untuk pelanggan <b>{l.relatedCustomer.name ?? l.relatedCustomer.code}</b> ({l.relatedCustomer.code}{l.relatedCustomer.packageName ? ` · ${l.relatedCustomer.packageName}` : ""}) — acuan saja; status lead mengikuti {l.kind === "INTERNET" ? "kode pelanggan baru di bawah" : "penawaran"}.
+          </p>
+        )}
         {l.customer ? (
           <>
             <div className="flex items-center gap-3"><Avatar name={l.customer.name} size={38} />

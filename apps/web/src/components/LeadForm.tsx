@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { CUST_STATUS, KIND } from "@/lib/leads";
 
-export interface LeadFields { kind: string; name: string; phone: string; email: string; address: string; area: string; interest: string; source: string; notes: string }
-const EMPTY: LeadFields = { kind: "INTERNET", name: "", phone: "", email: "", address: "", area: "", interest: "", source: "", notes: "" };
+export interface LeadFields { kind: string; name: string; phone: string; email: string; address: string; area: string; interest: string; source: string; notes: string; relatedCustomerCode: string }
+const EMPTY: LeadFields = { kind: "INTERNET", name: "", phone: "", email: "", address: "", area: "", interest: "", source: "", notes: "", relatedCustomerCode: "" };
 
 export default function LeadForm({ initial, submitLabel, onSubmit }: { initial?: Partial<LeadFields>; submitLabel: string; onSubmit: (f: LeadFields) => Promise<void> }) {
   const [f, setF] = useState<LeadFields>({ ...EMPTY, ...initial });
@@ -13,6 +13,9 @@ export default function LeadForm({ initial, submitLabel, onSubmit }: { initial?:
   const [areas, setAreas] = useState<string[]>([]);
   const [pkgs, setPkgs] = useState<string[]>([]);
   const [hint, setHint] = useState<any>(null);
+  const [q, setQ] = useState("");
+  const [found, setFound] = useState<any[] | null>(null);
+  const [picked, setPicked] = useState<any>(null);
   const editing = initial !== undefined;
   const set = (k: keyof LeadFields, v: string) => setF((p) => ({ ...p, [k]: v }));
 
@@ -20,6 +23,18 @@ export default function LeadForm({ initial, submitLabel, onSubmit }: { initial?:
     api("/wo/areas").then((a: any[]) => setAreas(a.map((x) => x.name))).catch(() => {});
     api("/wo/packages").then((a: any[]) => setPkgs(a.filter((x) => x.active !== false).map((x) => x.name))).catch(() => {});
   }, []);
+  // Cari pelanggan existing di cermin WO (nama / kode / telepon)
+  useEffect(() => {
+    setFound(null);
+    if (q.trim().length < 2 || picked) return;
+    const t = setTimeout(() => api(`/customers?q=${encodeURIComponent(q.trim())}`).then(setFound).catch(() => setFound([])), 350);
+    return () => clearTimeout(t);
+  }, [q, picked]);
+  const pick = (c: any) => {
+    setPicked(c); setQ(""); setFound(null);
+    setF((p) => ({ ...p, relatedCustomerCode: c.code, name: p.name || c.name, phone: p.phone || c.phone || "", email: p.email || c.email || "", address: p.address || c.address || "", area: p.area || c.areaName || "" }));
+  };
+  const unpick = () => { setPicked(null); setF((p) => ({ ...p, relatedCustomerCode: "" })); };
   // Petunjuk langsung: apakah nomor ini sudah milik pelanggan WO?
   useEffect(() => {
     setHint(null);
@@ -46,6 +61,32 @@ export default function LeadForm({ initial, submitLabel, onSubmit }: { initial?:
               </label>
             ))}
           </div>
+        </div>
+      )}
+      {!editing && (
+        <div className="rounded-lg border border-slate-200 p-3 dark:border-white/10">
+          <label className="lbl">Sudah pelanggan? Cari di WO (nama, kode, atau telepon)</label>
+          {picked ? (
+            <div className="flex items-start justify-between gap-2 text-sm">
+              <span><b>{picked.name}</b> <span className="text-slate-500">· {picked.code} · {CUST_STATUS[picked.status] ?? picked.status}{picked.packageName ? ` · ${picked.packageName}` : ""}</span>
+                <span className="mt-0.5 block text-xs text-slate-500">{f.kind === "INTERNET" ? "Layanan internet baru: WO akan membuat kode pelanggan baru; pelanggan ini hanya menjadi acuan." : "Layanan non-internet: penawaran/order ditautkan ke pelanggan ini (tidak membuat pelanggan baru)."}</span></span>
+              <button type="button" className="btn-ghost shrink-0 !px-2 !py-1 text-xs" onClick={unpick}>Lepas</button>
+            </div>
+          ) : (
+            <>
+              <input className="input" placeholder="mis. PT Maju, 08123…, atau kode pelanggan" value={q} onChange={(e) => setQ(e.target.value)} />
+              {found && (
+                <ul className="mt-1 max-h-48 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200 text-sm dark:divide-white/10 dark:border-white/10">
+                  {found.length === 0 && <li className="px-3 py-2 text-slate-500">Tidak ditemukan — lanjut sebagai prospek baru.</li>}
+                  {found.map((c) => (
+                    <li key={c.code}><button type="button" className="w-full px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-white/5" onClick={() => pick(c)}>
+                      <b>{c.name}</b> <span className="text-slate-500">· {c.code} · {CUST_STATUS[c.status] ?? c.status}{c.packageName ? ` · ${c.packageName}` : ""}{c.areaName ? ` · ${c.areaName}` : ""}</span>
+                    </button></li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
         </div>
       )}
       <div className="grid gap-3 sm:grid-cols-2">

@@ -75,3 +75,31 @@ CRM mencetak penawaran A4 memakai kop yang sama dengan dokumen WO. Mohon dikonfi
 2. CRM: Lead, katalog, Quotation + cetak A4 **tidak menunggu WO** (data penawaran tetap di CRM).
 3. WO: bagian **B + D** → CRM mengaktifkan outbox sinkron (fase terakhir, sakelar `WO_SYNC_ENABLED`).
 4. Uji bersama di server: satu penawaran uji `SENT → ACCEPTED`, lalu cek WO (pelanggan CRM + WO `SERVICE_ORDER`, katalog baru muncul di Master Paket).
+
+## G. Notifikasi dari CRM lewat WO (Telegram / email / kotak masuk) — usulan
+CRM sudah punya lonceng notifikasi dalam aplikasi (`crm_notifications`). Agar pengguna juga diberi tahu di luar CRM, **WO yang mengirim** (WO sudah memegang preferensi tiap pengguna: Telegram tertaut, email, kotak masuk), CRM hanya menyerahkan peristiwanya.
+
+`POST /api/integrations/crm/notifications` — header `x-api-key` = `CRM_INTEGRATION_KEY` (kunci yang sama dengan tulis katalog/penawaran), idempoten.
+```json
+{ "userId": "id pengguna WO", "type": "QUOTATION_SUBMITTED", "title": "Penawaran QT-026-0007 menunggu persetujuan",
+  "body": "PT Maju · diajukan Nurman", "link": "/crm/quotations/7", "dedupeKey": "qt-sub:7:1" }
+```
+- WO meneruskan lewat jalur notifikasinya sendiri (kotak masuk [CRM] + Telegram/email sesuai pengaturan penerima); `link` relatif, WO membentuk URL absolut dari domain Maung.
+- Idempoten menurut `(userId, dedupeKey)` → 200 `{ok:true, duplicate:true}`; pengguna tidak ada/nonaktif → 404 (CRM melewati, tidak mengulang); isi tidak valid → 422; batas laju mis. 120/menit.
+- Tidak menulis apa pun selain notifikasi. Pesan dari baris demo tidak pernah dikirim CRM.
+- Sisi CRM (setelah WO siap): sakelar `WO_NOTIFY_ENABLED`, memakai antrean `wo_outbox` yang sama (coba ulang, tidak pernah menggagalkan proses utama). Mohon kabari commit-nya.
+
+## H. Layanan baru / tambahan untuk pelanggan yang SUDAH ada (internet maupun non-internet) — usulan
+Fakta dasar: di WO satu **kode pelanggan = satu layanan/lokasi**. Layanan internet baru untuk pemilik/PIC yang sama tetap mendapat **kode pelanggan baru**; nama dan nomor bisa sama dengan kode lama, jadi pencocokan nomor/nama saja ambigu.
+
+**Non-internet (sewa WiFi, CCTV, dll.) — sudah didukung di D.3:**
+1. `customer.code` terisi dan ada → Order Jasa ditautkan ke pelanggan itu, tidak membuat pelanggan baru, tidak menyentuh status/paket/MSRadius. Mohon dikonfirmasi tetap berlaku di implementasi 2b.
+2. **Baru:** `customer.parentCode` (opsional, dipakai bila `customer.code` kosong) = kode pelanggan existing yang menjadi induk akun (mis. cabang/lokasi baru dengan PIC sama). WO membuat pelanggan CRM baru untuk lokasi itu dan menyimpan `parentCode` apa adanya. Kode induk tidak ada → 404.
+
+**Internet — layanan baru untuk pelanggan lama:**
+3. **Formulir Berlangganan / pelanggan PROSPECT**: tambah dua kolom opsional yang bisa diisi Marketing di WO — `parentCustomerCode` (kode pelanggan lama sebagai induk akun) dan `crmLeadRef` (nomor Lead CRM, mis. `LD-123`). Boleh diisi setelah PROSPECT terbentuk dari MSRadius.
+4. **Export API** (`customers` dan `subscriptions`): tambahkan `parentCustomerCode` dan `crmLeadRef`. Dengan itu CRM menautkan Lead ke **kode baru secara pasti** (tanpa menebak dari nomor/nama); bila kosong CRM tetap memakai aturan konservatif sekarang (satu kandidat baru yang dibuat setelah Lead, bukan kode acuan) dan menampilkan saran untuk konfirmasi manual.
+5. Opsional UI WO: halaman Pelanggan menampilkan kelompok "akun" (induk + layanan-layanannya) agar semua kode milik pemilik/PIC yang sama terlihat bersama.
+6. Pemeriksaan WO berdasarkan `customerCode` tidak berubah: alur Pasang Baru/Online tetap per kode baru; CRM hanya membaca statusnya (`PROSPECT → INSTALLING → ACTIVE`/`REJECTED|CANCELLED`).
+
+Sisi CRM yang sudah ada: Lead menyimpan `relatedCustomerCode` (pelanggan acuan, dipilih lewat pencarian cermin WO) terpisah dari `customerCode` (kode layanan yang dilacak).

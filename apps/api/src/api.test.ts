@@ -587,6 +587,28 @@ test("Dashboard KPI: rentang tanggal, cakupan staf vs reviewer, filter marketing
   assert.equal((await rq("tMktTanpaAkses", "/dashboard")).s, 403);
 });
 
+test("Lead untuk pelanggan existing: pilih dari WO (acuan), internet = kode baru dilacak terpisah, non-internet = ditautkan ke pelanggan itu", async () => {
+  const j = async (r: Response) => ({ s: r.status, d: await r.json().catch(() => ({})) as any });
+  const rq = (tok: string, m: string, path: string, body?: unknown) => call(tok, m, "/crm/api" + path, body).then(j);
+  await pool.query(`INSERT INTO wo_customers (code,name,phone,phone_norm,phone_digits,status,package_name,wo_created_at) VALUES
+    ('EX-1','PT Lama','081355550001','6281355550001','6281355550001','ACTIVE','Paket 20M', now() - interval '400 days')`);
+  assert.equal((await rq("tNurman", "GET", "/customers?q=PT Lama")).d[0].code, "EX-1"); // pencarian nama dari cermin WO
+  assert.equal((await rq("tNurman", "POST", "/leads", { kind: "INTERNET", name: "PT Lama", phone: "081355550001", relatedCustomerCode: "NADA" })).s, 400);
+  // internet: layanan baru → status pelanggan lama TIDAK diikuti (bukan Won), acuan tersimpan
+  const li = (await rq("tNurman", "POST", "/leads", { kind: "INTERNET", name: "PT Lama (cabang)", phone: "081355550001", relatedCustomerCode: "EX-1" })).d;
+  assert.equal(li.relatedCustomerCode, "EX-1"); assert.equal(li.relatedCustomer.name, "PT Lama"); assert.equal(li.existingCustomer, true);
+  assert.equal(li.customerCode, null); assert.equal(li.stage, "NEW");
+  const { refreshLeadLinks } = await import("./leads.js"); await refreshLeadLinks();
+  const li2 = (await rq("tNurman", "GET", `/leads/${li.id}`)).d; assert.equal(li2.customerCode, null); assert.equal(li2.stage, "NEW");
+  // WO membuat kode BARU untuk layanan baru → tertaut otomatis ke kode baru itu, bukan ke EX-1
+  await pool.query(`INSERT INTO wo_customers (code,name,phone,phone_norm,phone_digits,status,wo_created_at) VALUES ('EX-2','PT Lama (cabang)','081355550001','6281355550001','6281355550001','PROSPECT', now() + interval '1 hour')`);
+  await refreshLeadLinks();
+  const li3 = (await rq("tNurman", "GET", `/leads/${li.id}`)).d; assert.equal(li3.customerCode, "EX-2"); assert.equal(li3.relatedCustomerCode, "EX-1");
+  // non-internet: ditautkan langsung ke pelanggan yang dipilih (order jasa tidak membuat pelanggan baru)
+  const ln = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "PT Lama", phone: "081355550001", relatedCustomerCode: "EX-1" })).d;
+  assert.equal(ln.customerCode, "EX-1"); assert.equal(ln.linkState, "MANUAL"); assert.equal(ln.relatedCustomerCode, "EX-1");
+});
+
 test("Jejak marketing permanen: snapshot id+nama pada lead & penawaran; tahan ganti nama/hapus di WO; payload PUT WO selalu memuat marketingUserId+marketingName", async () => {
   const j = async (r: Response) => ({ s: r.status, d: await r.json().catch(() => ({})) as any });
   const rq = (tok: string, m: string, path: string, body?: unknown) => call(tok, m, "/crm/api" + path, body).then(j);

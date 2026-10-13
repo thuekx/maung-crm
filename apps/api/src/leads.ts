@@ -29,8 +29,9 @@ const createSchema = z.object({
   phone: z.string().trim().min(5, "Nomor telepon wajib").max(30),
   email: opt(120), address: opt(300), area: opt(80), interest: opt(200), source: opt(80), notes: opt(2000),
   ownerId: z.string().optional(),
+  relatedCustomerCode: opt(40), // pelanggan WO existing yang menjadi acuan (layanan baru/tambahan)
 });
-const patchSchema = createSchema.omit({ kind: true }).partial();
+const patchSchema = createSchema.omit({ kind: true, relatedCustomerCode: true }).partial();
 
 /** Pemilik/pembuat melihat miliknya; reviewer (ADMIN / MKT MANAGER|SUPERVISOR) melihat semua. */
 const scope = (u: Principal, args: unknown[]) => {
@@ -117,7 +118,7 @@ export async function refreshLeadLinks(): Promise<{ linked: number; moved: numbe
   for (const lead of open.rows) {
     if (!lead.customer_code && lead.link_state === "NONE" && lead.phone) {
       const m = await lookupByPhone(lead.phone);
-      const pick = pickAuto("INTERNET", lead.created_at, m.exact);
+      const pick = pickAuto("INTERNET", lead.created_at, lead.related_customer_code ? m.exact.filter((c: any) => c.code !== lead.related_customer_code) : m.exact);
       if (pick) { await applyLink(pool, lead.id, pick.code, "AUTO", null); lead.customer_code = pick.code; linked++; }
     }
     if (await followCustomer(pool, lead)) moved++;
@@ -139,19 +140,27 @@ leadRoutes.post("/", ah(async (req, res) => {
   const p = normalizePhone(b.phone);
   const m = await lookupByPhone(b.phone);
   const now = new Date();
-  const auto = pickAuto(b.kind, now, m.exact);
-  const existing = b.kind === "INTERNET" && m.exact.some((c: any) => c.status === "ACTIVE" || c.status === "SUSPENDED" || c.status === "NEED_CHECK");
+  let related: any = null;
+  if (b.relatedCustomerCode) {
+    related = (await pool.query("SELECT code, status FROM wo_customers WHERE code=$1", [b.relatedCustomerCode])).rows[0];
+    if (!related) throw fail(400, `Pelanggan ${b.relatedCustomerCode} tidak ada di cermin WO`);
+  }
+  // Pelanggan acuan tidak boleh ikut dipilih otomatis: layanan baru internet = kode pelanggan BARU yang dibuat WO.
+  const exactCands = related && b.kind === "INTERNET" ? m.exact.filter((c: any) => c.code !== related.code) : m.exact;
+  const auto = related && b.kind === "NON_INTERNET" ? null : pickAuto(b.kind, now, exactCands);
+  const existing = !!related || (b.kind === "INTERNET" && m.exact.some((c: any) => c.status === "ACTIVE" || c.status === "SUSPENDED" || c.status === "NEED_CHECK"));
   const dupes = (await pool.query("SELECT id, name, stage, owner_name AS \"ownerName\" FROM leads WHERE deleted_at IS NULL AND stage = ANY($1) AND phone_norm IS NOT DISTINCT FROM $2 AND ($2::text IS NOT NULL OR phone_digits=$3) ORDER BY id DESC LIMIT 5", [OPEN, p.e164, p.digits])).rows;
   const c = await pool.connect();
   let id: number;
   try {
     await c.query("BEGIN");
     const r = await c.query(
-      `INSERT INTO leads (kind,name,phone,phone_norm,phone_digits,email,address,area,interest,source,notes,owner_id,owner_name,existing_customer,created_by,created_by_name,created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
-      [b.kind, b.name, b.phone, p.e164, p.digits || null, b.email ?? null, b.address ?? null, b.area ?? null, b.interest ?? null, b.source ?? null, b.notes ?? null, ownerId, ownerName, existing, u.id, u.name, now]);
+      `INSERT INTO leads (kind,name,phone,phone_norm,phone_digits,email,address,area,interest,source,notes,owner_id,owner_name,existing_customer,created_by,created_by_name,created_at,related_customer_code)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
+      [b.kind, b.name, b.phone, p.e164, p.digits || null, b.email ?? null, b.address ?? null, b.area ?? null, b.interest ?? null, b.source ?? null, b.notes ?? null, ownerId, ownerName, existing, u.id, u.name, now, related?.code ?? null]);
     id = r.rows[0].id;
     await event(c, id, "CREATED", { to: "NEW", actor: u });
+    if (related && b.kind === "NON_INTERNET") await applyLink(c, id, related.code, "MANUAL", u); // layanan non-internet: order jasa ditautkan ke pelanggan yang dipilih (bukan membuat pelanggan baru)
     if (auto) {
       await applyLink(c, id, auto.code, "AUTO", u);
       if (b.kind === "INTERNET") await followCustomer(c, { id, kind: b.kind, customer_code: auto.code, stage: "NEW", created_at: now });
@@ -169,10 +178,11 @@ async function detail(l: any) {
       ? pool.query(`SELECT code, name, phone, package_name AS "packageName", status, radius_status AS "radiusStatus", area_name AS "areaName", sales_name AS "salesName", activated_at AS "activatedAt" FROM wo_customers WHERE code=$1`, [l.customer_code])
       : Promise.resolve({ rows: [] as any[] }),
   ]);
+  const related = l.related_customer_code ? (await pool.query(`SELECT code, name, phone, package_name AS "packageName", status, area_name AS "areaName" FROM wo_customers WHERE code=$1`, [l.related_customer_code])).rows[0] ?? { code: l.related_customer_code } : null;
   return {
     id: l.id, kind: l.kind, stage: l.stage, name: l.name, phone: l.phone, phoneNorm: l.phone_norm, email: l.email, address: l.address, area: l.area,
     interest: l.interest, source: l.source, notes: l.notes, ownerId: l.owner_id, ownerName: l.owner_name, createdBy: l.created_by, createdByName: l.created_by_name,
-    customerCode: l.customer_code, linkState: l.link_state, existingCustomer: l.existing_customer,
+    customerCode: l.customer_code, linkState: l.link_state, existingCustomer: l.existing_customer, relatedCustomerCode: l.related_customer_code ?? null, relatedCustomer: related,
     lostReason: l.lost_reason, lostAuto: l.lost_auto, wonAt: l.won_at, closedAt: l.closed_at, createdAt: l.created_at, updatedAt: l.updated_at,
     customer: cust.rows[0] ?? null, events: events.rows, stages: STAGES[l.kind as Kind], manualStages: MANUAL[l.kind as Kind],
   };
