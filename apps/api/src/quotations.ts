@@ -97,6 +97,40 @@ async function seqOf(number: string, created: Date) {
 }
 
 async function bankAccounts(): Promise<BankAccount[]> { return (await getSetting("bankAccounts")).list; }
+
+/**
+ * Sekali saja: rekening utama yang selama ini tercetak (Pengaturan Formulir WO) dimasukkan ke daftar rekening CRM sebagai BAWAAN,
+ * dan penawaran yang belum punya rekening diberi rekening itu — agar cetakan tidak kehilangan rekening setelah fitur pilihan rekening.
+ * Setelah itu daftar sepenuhnya diatur Admin (hapus/ubah tidak dikembalikan lagi).
+ */
+export async function ensureMainBank(auth: string | undefined): Promise<BankAccount[]> {
+  const set = await getSetting("bankAccounts") as { list: BankAccount[]; mainSeeded?: boolean };
+  if (set.mainSeeded || !auth) return set.list;
+  try {
+    const r = await fetch(`${WO_URL()}/api/subscription-settings`, { headers: { authorization: auth }, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return set.list;
+    const d = (await r.json()) as { bankName?: unknown; accName?: unknown; accNo?: unknown };
+    const t = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+    const digits = (v: string) => v.replace(/\D/g, "");
+    let list = set.list;
+    if (t(d.bankName) && t(d.accNo)) {
+      const main: BankAccount = { id: "utama", bankName: t(d.bankName), accName: t(d.accName), accNo: t(d.accNo), isDefault: true };
+      const same = list.find((x) => digits(x.accNo) === digits(main.accNo));
+      list = same ? list.map((x) => ({ ...x, isDefault: x === same })) : [main, ...list.map((x) => ({ ...x, isDefault: false }))];
+    }
+    const c = await pool.connect();
+    try {
+      await c.query("BEGIN");
+      const cur = (await c.query("SELECT value FROM crm_settings WHERE key='bankAccounts' FOR UPDATE")).rows[0]?.value;
+      if (cur?.mainSeeded) { await c.query("ROLLBACK"); return cur.list; } // sudah diisi permintaan lain
+      await c.query(`INSERT INTO crm_settings (key,value,updated_by) VALUES ('bankAccounts',$1,'sistem') ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=now(), updated_by='sistem'`, [JSON.stringify({ list, mainSeeded: true })]);
+      const def = list.find((x) => x.isDefault);
+      if (def) await c.query("UPDATE quotations SET bank_account=$1 WHERE bank_account IS NULL", [bankSnap(def)]);
+      await c.query("COMMIT");
+    } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
+    return list;
+  } catch { return set.list; }
+}
 const bankSnap = (b: BankAccount | undefined) => (b ? { id: b.id, bankName: b.bankName, accName: b.accName, accNo: b.accNo } : null);
 
 /** Nama Manager dari Pengaturan Formulir WO saat disetujui (disalin agar cetakan lama tidak ikut berubah bila Manager diganti). */
@@ -174,7 +208,7 @@ quotationRoutes.post("/", ah(async (req, res) => {
   if (lead.kind !== "NON_INTERNET") throw fail(409, "Penawaran hanya untuk lead non-internet / layanan tambahan (lead internet didaftarkan di MSRadius)");
   if (["WON", "LOST"].includes(lead.stage)) throw fail(409, "Lead sudah ditutup");
   const cfg = await getSetting("quotation"); // default dari Pengaturan CRM
-  const banks = await bankAccounts();
+  const banks = await ensureMainBank(req.headers.authorization);
   const bank = b.bankAccountId !== undefined ? banks.find((x) => x.id === b.bankAccountId) : banks.find((x) => x.isDefault) ?? banks[0];
   const c = await pool.connect();
   let id: number;
@@ -215,8 +249,8 @@ quotationRoutes.get("/", ah(async (req, res) => {
 }));
 
 /** Pilihan untuk editor: rekening PT (bawaan ditandai). */
-quotationRoutes.get("/options", ah(async (_req, res) => {
-  res.json({ bankAccounts: await bankAccounts() });
+quotationRoutes.get("/options", ah(async (req, res) => {
+  res.json({ bankAccounts: await ensureMainBank(req.headers.authorization) });
 }));
 
 /** Salinan revisi lama (baca-saja): isi persis seperti sebelum revisi berikutnya dibuat. */

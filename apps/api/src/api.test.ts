@@ -102,7 +102,7 @@ before(async () => {
         { id: "u-luar", name: "Orang Luar", email: "luar@contoh.com", role: "MKT", subRole: "STAFF", active: true },
       ]));
     }
-    if (req.url === "/api/subscription-settings") { res.statusCode = 200; return void res.end(JSON.stringify({ managerName: woManager, bankName: "BANK WO" })); }
+    if (req.url === "/api/subscription-settings") { res.statusCode = 200; return void res.end(JSON.stringify({ managerName: woManager, bankName: "BANK BCA KCP Buahbatu BANDUNG", accName: "Lintas Satu Visi PT", accNo: "7753555511" })); }
     if (req.url === "/api/auth/me") {
       const u = USERS[t];
       res.statusCode = u ? 200 : 401;
@@ -1112,4 +1112,21 @@ test("UAT penawaran: format nomor Admin + mulai + manual tanpa ganda, rekening d
   assert.equal((await rq("tRasyad", "GET", `/quotations/${a.id}/revisions/1`)).s, 404);
   assert.equal((await rq("tNurman", "PUT", `/quotations/${a.id}/revisions/1`, { subject: "x" })).s, 404);
   woManager = "M Gugi Granada";
+});
+
+test("Rekening utama WO dikembalikan sekali sebagai bawaan CRM; penawaran tanpa rekening diisi; daftar Admin tidak ditimpa lagi", async () => {
+  const j = async (r: Response) => ({ s: r.status, d: await r.json().catch(() => ({})) as any });
+  const rq = (tok: string, m: string, path: string, body?: unknown) => call(tok, m, "/crm/api" + path, body).then(j);
+  // keadaan pengguna: Admin sudah menambah satu rekening lain (sebelum perbaikan), penawaran lama tanpa rekening
+  await pool.query("INSERT INTO crm_settings (key,value,updated_by) VALUES ('bankAccounts',$1,'x') ON CONFLICT (key) DO UPDATE SET value=$1",
+    [JSON.stringify({ list: [{ id: "mdr", bankName: "BANK MANDIRI", accName: "PT LSV", accNo: "1300012345678", isDefault: true }] })]);
+  const qid = (await pool.query("SELECT id FROM quotations WHERE deleted_at IS NULL ORDER BY id LIMIT 1")).rows[0].id;
+  await pool.query("UPDATE quotations SET bank_account=NULL WHERE id=$1", [qid]);
+  const o = (await rq("tNurman", "GET", "/quotations/options")).d.bankAccounts;
+  assert.deepEqual(o.map((b: any) => [b.id, b.isDefault]), [["utama", true], ["mdr", false]]);
+  assert.equal(o[0].bankName, "BANK BCA KCP Buahbatu BANDUNG");
+  assert.equal((await rq("tNurman", "GET", `/quotations/${qid}`)).d.bankAccount.accNo, "7753555511");
+  // Admin menghapus rekening utama → tidak dikembalikan lagi
+  assert.equal((await rq("tAdmin", "PUT", "/admin/settings", { bankAccounts: [{ id: "mdr", bankName: "BANK MANDIRI", accName: "PT LSV", accNo: "1300012345678", isDefault: true }] })).s, 200);
+  assert.deepEqual((await rq("tNurman", "GET", "/quotations/options")).d.bankAccounts.map((b: any) => b.id), ["mdr"]);
 });

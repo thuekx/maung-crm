@@ -10,7 +10,7 @@ export interface NumberingSettings { template: string; digits: number }
 export const DEFAULTS = {
   quotation: { taxRate: 11, validDays: 14, terms: DEFAULT_TERMS } as QuotationSettings,
   numbering: { template: "QT/LIV/{BLN}/{YY}{NO}", digits: 4 } as NumberingSettings,
-  bankAccounts: { list: [] as BankAccount[] },
+  bankAccounts: { list: [] as BankAccount[], mainSeeded: false as boolean },
   woSync: { paused: false },
   backup: { autoDaily: true },
 };

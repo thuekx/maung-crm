@@ -55,8 +55,8 @@ export default function QuotationPrint({ params }: { params: Promise<{ id: strin
   const archived = q.archived as { rev: number; reason?: string; actorName?: string; at: string; currentRev: number } | undefined;
   const official = !archived && ["APPROVED", "SENT", "ACCEPTED"].includes(q.status);
   const mark = archived ? `ARSIP REV ${archived.rev}` : official ? null : (QSTATUS[q.status] ?? q.status).toUpperCase();
-  // Rekening: pilihan di penawaran; bila CRM belum punya daftar rekening, pakai rekening di Pengaturan Formulir WO (perilaku lama).
-  const bank = q.bankAccount ?? (banks && banks.length === 0 && cfg?.bankName ? { bankName: cfg.bankName, accName: cfg.accName, accNo: cfg.accNo } : null);
+  // Rekening: pilihan di penawaran → rekening bawaan CRM → (daftar kosong) rekening di Pengaturan Formulir WO.
+  const bank = q.bankAccount ?? banks?.find((b) => b.isDefault) ?? (banks && banks.length === 0 && cfg?.bankName ? { bankName: cfg.bankName, accName: cfg.accName, accNo: cfg.accNo } : null);
   const pages = layout.pages;
   const all = layout.fitsTail ? pages : [...pages, []]; // ringkasan/syarat pindah ke halaman baru bila tidak muat
   let no = 0;

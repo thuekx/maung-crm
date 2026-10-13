@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { calc, num, rupiah } from "@/lib/money";
 
@@ -16,6 +16,7 @@ export default function QuoteEditor({ q, catalog, banks, onSaved, onCatalog }: {
   const [busy, setBusy] = useState(false);
   const [seq, setSeq] = useState(q.seq != null ? String(q.seq) : "");
   const [bankId, setBankId] = useState<string>(q.bankAccount?.id ?? "");
+  useEffect(() => { if (!bankId && banks.length) setBankId((banks.find((b) => b.isDefault) ?? banks[0]).id); }, [banks, bankId]); // bawaan bila belum ada
   const [ni, setNi] = useState<{ line: number; f: typeof NEW_ITEM } | null>(null); // item katalog baru untuk baris ke-n
   const [err, setErr] = useState("");
   const byId = new Map(catalog.map((c) => [String(c.id), c]));
@@ -33,7 +34,7 @@ export default function QuoteEditor({ q, catalog, banks, onSaved, onCatalog }: {
       await api(`/quotations/${q.id}`, { method: "PUT", json: {
         ...h, taxRate: num(h.taxRate), discount: num(h.discount), validUntil: h.validUntil || undefined,
         lines: filled.map((l) => ({ catalogId: Number(l.catalogId), qty: num(l.qty), unitPrice: num(l.unitPrice), note: l.note.trim() || undefined })),
-        ...(bankId === "" || banks.some((b) => b.id === bankId) ? { bankAccountId: bankId } : {}), ...(q.numberEditable && seq.trim() ? { seq: Number(seq.trim()) } : {}),
+        ...(banks.some((b) => b.id === bankId) ? { bankAccountId: bankId } : {}), ...(q.numberEditable && seq.trim() ? { seq: Number(seq.trim()) } : {}),
       } });
       if (submit) await api(`/quotations/${q.id}/submit`, { method: "POST", json: {} });
       await onSaved();
@@ -118,7 +119,7 @@ export default function QuoteEditor({ q, catalog, banks, onSaved, onCatalog }: {
       <div><label className="lbl">Catatan</label><textarea className="input" rows={2} value={h.notes} onChange={(e) => setH({ ...h, notes: e.target.value })} /></div>
       <div><label className="lbl">Rekening pembayaran</label>
         <select className="input" value={bankId} onChange={(e) => setBankId(e.target.value)}>
-          <option value="">— tanpa rekening —</option>
+          {!bankId && <option value="">— pilih rekening —</option>}
           {banks.map((b) => <option key={b.id} value={b.id}>{b.bankName} · {b.accNo}{b.isDefault ? " (bawaan)" : ""}</option>)}
           {q.bankAccount && !banks.some((b) => b.id === q.bankAccount.id) && <option value={q.bankAccount.id}>{q.bankAccount.bankName} · {q.bankAccount.accNo} (sudah dihapus dari pengaturan)</option>}
         </select>

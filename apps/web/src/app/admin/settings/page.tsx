@@ -73,7 +73,7 @@ export default function SettingsAdmin() {
           <button type="button" className="btn-ghost" onClick={() => setBanks([...banks, { id: `b${Date.now().toString(36)}`, bankName: "", accName: "", accNo: "", isDefault: banks.length === 0 }])}>+ Tambah rekening</button>
           <button className="btn" disabled={busy} onClick={() => save({ bankAccounts: banks.map((b) => ({ ...b, bankName: b.bankName.trim(), accName: b.accName.trim(), accNo: b.accNo.trim() })) }, "Rekening disimpan")}>Simpan rekening</button>
         </div>
-        {banks.length === 0 && <p className="text-xs text-slate-500">Selama daftar ini kosong, cetakan penawaran memakai rekening di Pengaturan Formulir WO.</p>}
+        {banks.length === 0 && <p className="text-xs text-slate-500">Selama daftar ini kosong, cetakan penawaran memakai rekening di Pengaturan Formulir WO. Rekening utama dari WO dimasukkan otomatis sekali sebagai bawaan.</p>}
       </Section>
 
       <Section icon="sync" title="Kirim ke WO" aside={<Badge tone={i.wo.enabled ? "green" : "amber"} dot>{i.wo.enabled ? "aktif" : i.wo.paused ? "dijeda" : "nonaktif"}</Badge>}>

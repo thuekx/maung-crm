@@ -8,7 +8,7 @@ import { requireRealAdmin } from "./auth.js";
 import { backupDir, createBackup, listBackups, overview, purgeData, readMeta, restoreBackup, safeName } from "./backup.js";
 import { loadDemo } from "./demo.js";
 import { getSetting, putSetting } from "./settings.js";
-import { formatNumber } from "./quotations.js";
+import { ensureMainBank, formatNumber } from "./quotations.js";
 import { outboxStatus, sendTestQuotation } from "./woPush.js";
 import { reconcile } from "./reconcile.js";
 
@@ -28,7 +28,8 @@ async function numberingInfo() {
   return { ...f, nextNo: v + 1, preview: formatNumber(f.template, f.digits, now, v + 1) };
 }
 
-adminRoutes.get("/admin/settings", ah(async (_req, res) => {
+adminRoutes.get("/admin/settings", ah(async (req, res) => {
+  await ensureMainBank(req.headers.authorization);
   const env = process.env;
   res.json({
     quotation: await getSetting("quotation"), woSync: await getSetting("woSync"), numbering: await numberingInfo(), bankAccounts: (await getSetting("bankAccounts")).list,
@@ -59,7 +60,7 @@ adminRoutes.put("/admin/settings", ah(async (req, res) => {
     if (new Set(b.bankAccounts.map((x) => x.id)).size !== b.bankAccounts.length) throw Object.assign(new Error("ID rekening ganda"), { status: 400 });
     const defs = b.bankAccounts.filter((x) => x.isDefault).length;
     if (b.bankAccounts.length && defs !== 1) throw Object.assign(new Error("Pilih tepat satu rekening bawaan"), { status: 400 });
-    await putSetting("bankAccounts", { list: b.bankAccounts }, req.user!.id);
+    await putSetting("bankAccounts", { list: b.bankAccounts, mainSeeded: true }, req.user!.id); // daftar dari Admin = final (rekening utama WO tidak ditambahkan lagi)
   }
   if (b.numbering) {
     const { nextNo, ...f } = b.numbering, now = new Date();
