@@ -3,8 +3,14 @@ import { pool } from "./db.js";
 /** Pengaturan CRM (tabel crm_settings). Tidak ikut terhapus oleh purge; ikut backup/restore bila dipilih. */
 export interface QuotationSettings { taxRate: number; validDays: number; terms: string }
 export const DEFAULT_TERMS = "Harga dalam Rupiah. Penawaran berlaku sampai tanggal yang tertera. Pekerjaan dimulai setelah penawaran disetujui dan pembayaran sesuai kesepakatan. Berita Acara ditandatangani setelah pekerjaan selesai.";
+/** Rekening pembayaran PT; satu ditandai bawaan dan dipilih per penawaran. */
+export interface BankAccount { id: string; bankName: string; accName: string; accNo: string; isDefault: boolean }
+/** Format nomor penawaran. Token: {BLN} bulan Romawi, {MM} bulan 2 digit, {YY}/{YYYY} tahun, {NO} nomor urut (reset tiap tahun). */
+export interface NumberingSettings { template: string; digits: number }
 export const DEFAULTS = {
   quotation: { taxRate: 11, validDays: 14, terms: DEFAULT_TERMS } as QuotationSettings,
+  numbering: { template: "QT/LIV/{BLN}/{YY}{NO}", digits: 4 } as NumberingSettings,
+  bankAccounts: { list: [] as BankAccount[] },
   woSync: { paused: false },
   backup: { autoDaily: true },
 };

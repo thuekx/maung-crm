@@ -30,11 +30,26 @@ export default function LeadForm({ initial, submitLabel, onSubmit }: { initial?:
     const t = setTimeout(() => api(`/customers?q=${encodeURIComponent(q.trim())}`).then(setFound).catch(() => setFound([])), 350);
     return () => clearTimeout(t);
   }, [q, picked]);
+  // Isian yang diambil dari pelanggan terpilih dicatat, agar "Lepas" mengosongkannya lagi (yang sudah diketik/diubah sendiri tetap).
+  type Fill = Partial<Record<"name" | "phone" | "email" | "address" | "area", string>>;
+  const [filled, setFilled] = useState<Fill>({});
   const pick = (c: any) => {
     setPicked(c); setQ(""); setFound(null);
-    setF((p) => ({ ...p, relatedCustomerCode: c.code, name: p.name || c.name, phone: p.phone || c.phone || "", email: p.email || c.email || "", address: p.address || c.address || "", area: p.area || c.areaName || "" }));
+    const src: Fill = { name: c.name, phone: c.phone ?? "", email: c.email ?? "", address: c.address ?? "", area: c.areaName ?? "" };
+    const took: Fill = {};
+    for (const [k, v] of Object.entries(src) as [keyof Fill, string][]) if (!String(f[k] ?? "").trim() && v) took[k] = v;
+    setF((p) => ({ ...p, ...took, relatedCustomerCode: c.code }));
+    setFilled(took);
   };
-  const unpick = () => { setPicked(null); setF((p) => ({ ...p, relatedCustomerCode: "", newLocation: false })); };
+  const unpick = () => {
+    setPicked(null);
+    setF((p) => {
+      const n = { ...p, relatedCustomerCode: "", newLocation: false };
+      for (const [k, v] of Object.entries(filled) as [keyof Fill, string][]) if (p[k] === v) n[k] = "";
+      return n;
+    });
+    setFilled({});
+  };
   // Petunjuk langsung: apakah nomor ini sudah milik pelanggan WO?
   useEffect(() => {
     setHint(null);

@@ -5,7 +5,8 @@ import { audit, pool } from "./db.js";
 import { isReviewer, type Principal } from "./auth.js";
 import { advanceLead } from "./leads.js";
 import { enqueue } from "./woPush.js";
-import { getSetting } from "./settings.js";
+import { getSetting, type BankAccount } from "./settings.js";
+import { WO_URL } from "./auth.js";
 import { woCustomerProblems } from "./woPayload.js";
 
 const fail = (status: number, error: string) => Object.assign(new Error(error), { status });
@@ -36,6 +37,8 @@ const bodySchema = z.object({
   taxRate: z.number().min(0).max(100).optional(),
   discount: z.number().min(0).max(1e12).optional(),
   lines: z.array(lineSchema).max(60).optional(),
+  bankAccountId: z.string().trim().max(40).optional(), // "" = tanpa rekening
+  seq: z.number().int().min(1).max(99_999_999).nullable().optional(), // nomor urut manual (null = otomatis); hanya draft rev 1 yang belum pernah dikirim
 });
 
 const scope = (u: Principal, args: unknown[]) => {
@@ -63,10 +66,48 @@ export function totals(lines: { qty: number; unitPrice: number }[], discount: nu
   return { subtotal, taxAmount: tax, total: r2(taxable + tax) };
 }
 
+const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
+/** Susun nomor dari format Admin (Pengaturan CRM → Nomor penawaran). */
+export function formatNumber(template: string, digits: number, d: Date, seq: number) {
+  const m = d.getMonth(), y = d.getFullYear();
+  return template.replace(/\{(BLN|MM|YYYY|YY|NO)\}/g, (_, t) =>
+    t === "BLN" ? ROMAN[m] : t === "MM" ? String(m + 1).padStart(2, "0") : t === "YYYY" ? String(y) : t === "YY" ? String(y % 100).padStart(2, "0") : String(seq).padStart(digits, "0"));
+}
+const numberTaken = async (db: Q, n: string, exceptId?: number) =>
+  !!(await db.query("SELECT 1 FROM quotations WHERE lower(number)=lower($1) AND id IS DISTINCT FROM $2", [n, exceptId ?? null])).rowCount;
+
+/** Nomor otomatis: penghitung per tahun; nomor yang sudah terpakai (mis. diisi manual) dilewati agar tidak ganda. */
 async function nextNumber(db: Q, d: Date) {
-  const y = d.getFullYear();
-  const r = await db.query("INSERT INTO quotation_counters (year,value) VALUES ($1,1) ON CONFLICT (year) DO UPDATE SET value=quotation_counters.value+1 RETURNING value", [y]);
-  return `QT-${String(y % 1000).padStart(3, "0")}-${String(r.rows[0].value).padStart(4, "0")}`;
+  const f = await getSetting("numbering");
+  for (let i = 0; i < 1000; i++) {
+    const r = await db.query("INSERT INTO quotation_counters (year,value) VALUES ($1,1) ON CONFLICT (year) DO UPDATE SET value=quotation_counters.value+1 RETURNING value", [d.getFullYear()]);
+    const n = formatNumber(f.template, f.digits, d, r.rows[0].value);
+    if (!(await numberTaken(db, n))) return n;
+  }
+  throw fail(409, "Tidak menemukan nomor penawaran yang kosong — periksa Pengaturan CRM → Nomor penawaran");
+}
+/** Nomor urut dari nomor tersimpan (untuk ditampilkan di editor); null bila tidak cocok dengan format saat ini. */
+async function seqOf(number: string, created: Date) {
+  const f = await getSetting("numbering");
+  if (!f.template.includes("{NO}")) return null;
+  const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const re = f.template.split(/(\{(?:BLN|MM|YYYY|YY|NO)\})/).map((p) => (p === "{NO}" ? "(\\d+)" : esc(/^\{\w+\}$/.test(p) ? formatNumber(p, f.digits, created, 0) : p))).join("");
+  const m = new RegExp(`^${re}$`, "i").exec(number);
+  return m ? Number(m[1]) : null;
+}
+
+async function bankAccounts(): Promise<BankAccount[]> { return (await getSetting("bankAccounts")).list; }
+const bankSnap = (b: BankAccount | undefined) => (b ? { id: b.id, bankName: b.bankName, accName: b.accName, accNo: b.accNo } : null);
+
+/** Nama Manager dari Pengaturan Formulir WO saat disetujui (disalin agar cetakan lama tidak ikut berubah bila Manager diganti). */
+async function woManagerName(auth: string | undefined): Promise<string | null> {
+  if (!auth) return null;
+  try {
+    const r = await fetch(`${WO_URL()}/api/subscription-settings`, { headers: { authorization: auth }, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return null;
+    const d = (await r.json()) as { managerName?: unknown };
+    return typeof d.managerName === "string" && d.managerName.trim() ? d.managerName.trim() : null;
+  } catch { return null; }
 }
 
 /** Ganti seluruh baris dari katalog aktif; nama/jenis/satuan disalin (penawaran tidak berubah bila katalog diubah). */
@@ -105,6 +146,8 @@ export async function detail(q: any) {
     taxRate: n(q.tax_rate), discount: n(q.discount), subtotal: n(q.subtotal), taxAmount: n(q.tax_amount), total: n(q.total),
     sentAt: q.sent_at, decidedAt: q.decided_at, decisionNote: q.decision_note, approvedByName: q.approved_by_name, approvedAt: q.approved_at,
     createdAt: q.created_at, updatedAt: q.updated_at,
+    bankAccount: q.bank_account ?? null, signerName: q.signer_name ?? null, seq: q.status === "DRAFT" ? await seqOf(q.number, new Date(q.created_at)) : null,
+    numberEditable: q.status === "DRAFT" && q.rev === 1 && !q.sent_at && !q.wo_synced_at,
     wo: { syncedAt: q.wo_synced_at ?? null, syncedRev: q.wo_synced_rev ?? null, syncedStatus: q.wo_synced_status ?? null, woNumber: q.wo_number ?? null, warnings: q.wo_warnings ?? null },
     lines: lines.rows.map((l) => ({ ...l, qty: n(l.qty), unitPrice: n(l.unitPrice) })),
     events: events.rows, revisions: revs.rows.map((r) => ({ ...r, total: Number(r.total) })),
@@ -131,6 +174,8 @@ quotationRoutes.post("/", ah(async (req, res) => {
   if (lead.kind !== "NON_INTERNET") throw fail(409, "Penawaran hanya untuk lead non-internet / layanan tambahan (lead internet didaftarkan di MSRadius)");
   if (["WON", "LOST"].includes(lead.stage)) throw fail(409, "Lead sudah ditutup");
   const cfg = await getSetting("quotation"); // default dari Pengaturan CRM
+  const banks = await bankAccounts();
+  const bank = b.bankAccountId !== undefined ? banks.find((x) => x.id === b.bankAccountId) : banks.find((x) => x.isDefault) ?? banks[0];
   const c = await pool.connect();
   let id: number;
   try {
@@ -143,6 +188,7 @@ quotationRoutes.post("/", ah(async (req, res) => {
       [number, lead.id, lead.owner_id, lead.owner_name, lead.customer_code, b.customerName ?? lead.name, b.customerPhone ?? lead.phone, b.customerEmail ?? lead.email, b.customerAddress ?? lead.address,
        b.picName ?? null, b.subject ?? lead.interest ?? null, b.validUntil ?? new Date(Date.now() + cfg.validDays * 86_400_000).toISOString().slice(0, 10), b.terms ?? cfg.terms, b.notes ?? null, b.taxRate ?? cfg.taxRate, b.discount ?? 0, u.id, u.name, !!lead.is_demo]); // penawaran dari lead demo ikut demo → tak pernah dikirim ke WO
     id = r.rows[0].id;
+    await c.query("UPDATE quotations SET bank_account=$2 WHERE id=$1", [id, bankSnap(bank)]);
     const t = totals(await writeLines(c, id, lines), b.discount ?? 0, b.taxRate ?? cfg.taxRate);
     await c.query("UPDATE quotations SET subtotal=$2, tax_amount=$3, total=$4 WHERE id=$1", [id, t.subtotal, t.taxAmount, t.total]);
     await event(c, id, "CREATED", { to: "DRAFT", actor: u });
@@ -168,6 +214,19 @@ quotationRoutes.get("/", ah(async (req, res) => {
   res.json(r.rows.map((x) => ({ ...x, total: Number(x.total), validUntil: x.validUntil ? String(x.validUntil).slice(0, 10) : null })));
 }));
 
+/** Pilihan untuk editor: rekening PT (bawaan ditandai). */
+quotationRoutes.get("/options", ah(async (_req, res) => {
+  res.json({ bankAccounts: await bankAccounts() });
+}));
+
+/** Salinan revisi lama (baca-saja): isi persis seperti sebelum revisi berikutnya dibuat. */
+quotationRoutes.get("/:id/revisions/:rev", ah(async (req, res) => {
+  const q = await load(idParam(req), req.user!), rev = Number(req.params.rev);
+  const r = (await pool.query("SELECT snapshot, reason, actor_name AS \"actorName\", at FROM quotation_revisions WHERE quotation_id=$1 AND rev=$2", [q.id, rev])).rows[0];
+  if (!r) throw fail(404, "Revisi tidak ditemukan");
+  res.json({ ...r.snapshot, archived: { rev, reason: r.reason, actorName: r.actorName, at: r.at, currentRev: q.rev } });
+}));
+
 quotationRoutes.get("/:id", ah(async (req, res) => { await sweepExpired(); res.json(await detail(await load(idParam(req), req.user!))); }));
 
 /** Ubah isi — hanya DRAFT. */
@@ -185,6 +244,23 @@ quotationRoutes.put("/:id", ah(async (req, res) => {
     await c.query(
       `UPDATE quotations SET customer_name=$2,customer_phone=$3,customer_email=$4,customer_address=$5,pic_name=$6,subject=$7,valid_until=$8,terms=$9,notes=$10,tax_rate=$11,discount=$12,updated_at=now() WHERE id=$1`,
       [id, m.customer_name, m.customer_phone, m.customer_email, m.customer_address, m.pic_name, m.subject, m.valid_until, m.terms, m.notes, m.tax_rate, m.discount]);
+    if (b.bankAccountId !== undefined) {
+      const bank = (await bankAccounts()).find((x) => x.id === b.bankAccountId);
+      if (b.bankAccountId && !bank) throw fail(400, "Rekening tidak ditemukan — muat ulang halaman");
+      await c.query("UPDATE quotations SET bank_account=$2 WHERE id=$1", [id, bankSnap(bank)]);
+    }
+    if (b.seq !== undefined) {
+      const created = new Date(q.created_at), cur = await seqOf(q.number, created);
+      if (b.seq !== null && b.seq !== cur) {
+        if (!(q.rev === 1 && !q.sent_at && !q.wo_synced_at)) throw fail(409, "Nomor hanya bisa diubah sebelum penawaran pertama kali dikirim");
+        const f = await getSetting("numbering");
+        if (!f.template.includes("{NO}")) throw fail(409, "Format nomor di Pengaturan CRM tidak memuat {NO}");
+        const n = formatNumber(f.template, f.digits, created, b.seq);
+        if (await numberTaken(c, n, id)) throw fail(409, `Nomor ${n} sudah dipakai penawaran lain`);
+        await c.query("UPDATE quotations SET number=$2 WHERE id=$1", [id, n]);
+        await event(c, id, "UPDATED", { note: `Nomor diubah: ${q.number} → ${n}`, actor: u });
+      }
+    }
     let priced: { qty: number; unitPrice: number }[];
     if (b.lines) priced = await writeLines(c, id, b.lines);
     else priced = (await c.query("SELECT qty, unit_price FROM quotation_lines WHERE quotation_id=$1", [id])).rows.map((l: any) => ({ qty: Number(l.qty), unitPrice: Number(l.unit_price) }));
@@ -245,9 +321,11 @@ quotationRoutes.post("/:id/:action", ah(async (req, res) => {
     }
   }
   if (key === "send" && q.valid_until && String(q.valid_until).slice(0, 10) < new Date().toISOString().slice(0, 10)) throw fail(409, "Tanggal berlaku sudah lewat — buat revisi dengan tanggal baru");
+  const signer = key === "approve" ? await woManagerName(req.headers.authorization) : null;
   const c = await pool.connect();
   try {
     await c.query("BEGIN");
+    if (key === "approve") await c.query("UPDATE quotations SET signer_name=$2 WHERE id=$1", [id, signer]);
     await c.query(
       `UPDATE quotations SET status=$2, updated_at=now(),
          approved_by=CASE WHEN $3='approve' THEN $4 WHEN $3='return' THEN NULL ELSE approved_by END, approved_by_name=CASE WHEN $3='approve' THEN $5 WHEN $3='return' THEN NULL ELSE approved_by_name END,

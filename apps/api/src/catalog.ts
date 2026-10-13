@@ -46,7 +46,7 @@ catalogRoutes.get("/", ah(async (req, res) => {
 
 catalogRoutes.post("/", ah(async (req, res) => {
   const u = req.user!;
-  if (!isReviewer(u)) throw fail(403, "Katalog dikelola reviewer (Admin / MKT Manager / Supervisor)");
+  // Item baru boleh ditambah siapa pun pengguna CRM (mis. langsung dari penawaran); ubah/nonaktifkan tetap hanya reviewer.
   const b = createBody.parse(req.body);
   await assertNameFree(b.name);
   const sku = b.sku || null;

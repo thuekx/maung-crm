@@ -13,6 +13,7 @@ export default function QuotationDetail({ params }: { params: Promise<{ id: stri
   const { id } = use(params);
   const [q, setQ] = useState<any>(null);
   const [catalog, setCatalog] = useState<any[]>([]);
+  const [banks, setBanks] = useState<any[]>([]);
   const [me, setMe] = useState<any>(null);
   const [ask, setAsk] = useState<Act | null>(null);
   const [note, setNote] = useState("");
@@ -22,7 +23,11 @@ export default function QuotationDetail({ params }: { params: Promise<{ id: stri
   const load = useCallback(async () => {
     try { setQ(await api(`/quotations/${id}`)); } catch (e: any) { setMsg(e.message); }
   }, [id]);
-  useEffect(() => { load(); api("/catalog").then(setCatalog).catch(() => {}); api("/me").then(setMe).catch(() => {}); }, [load]);
+  const loadCatalog = useCallback(async () => { const c = await api("/catalog"); setCatalog(c); return c; }, []);
+  useEffect(() => {
+    load(); loadCatalog().catch(() => {}); api("/me").then(setMe).catch(() => {});
+    api("/quotations/options").then((o) => setBanks(o.bankAccounts ?? [])).catch(() => {});
+  }, [load, loadCatalog]);
   if (!q) return <p>{msg || "Memuat…"}</p>;
 
   const reviewer = !!me?.reviewer;
@@ -35,7 +40,6 @@ export default function QuotationDetail({ params }: { params: Promise<{ id: stri
 
   const acts: Act[] = [];
   const s = q.status;
-  if (s === "DRAFT") acts.push({ key: "submit", label: "Ajukan untuk persetujuan", cls: "btn" });
   if (s === "PENDING_APPROVAL" && reviewer) acts.push({ key: "approve", label: "Setujui", cls: "btn" }, { key: "return", label: "Kembalikan ke draft", cls: "btn-ghost", note: "wajib" });
   if (s === "APPROVED") acts.push({ key: "send", label: "Tandai terkirim ke pelanggan", cls: "btn" });
   if (s === "SENT") acts.push({ key: "accept", label: "Pelanggan menyetujui", cls: "btn" }, { key: "reject", label: "Pelanggan menolak", cls: "btn-ghost", note: "wajib" });
@@ -78,7 +82,7 @@ export default function QuotationDetail({ params }: { params: Promise<{ id: stri
         </Section>
       )}
 
-      {s === "DRAFT" ? <QuoteEditor key={q.updatedAt} q={q} catalog={catalog} onSaved={load} /> : (
+      {s === "DRAFT" ? <QuoteEditor key={q.updatedAt} q={q} catalog={catalog} banks={banks} onSaved={load} onCatalog={loadCatalog} /> : (
         <Section icon="list" title="Rincian">
           {q.lines.map((l: any) => (
             <div key={l.id} className="flex justify-between gap-2 border-b border-slate-100 pb-1">
@@ -97,7 +101,6 @@ export default function QuotationDetail({ params }: { params: Promise<{ id: stri
       {acts.length > 0 && (
         <div className="card space-y-2">
           <div className="flex flex-wrap gap-2">{acts.map((a) => <button key={a.key} className={a.cls} disabled={busy} onClick={() => go(a)}>{a.label}</button>)}</div>
-          {s === "DRAFT" && <p className="text-xs text-slate-500">Simpan draft dulu sebelum mengajukan.</p>}
           {ask && (
             <div className="flex gap-2">
               <input className="input" placeholder={ask.key === "revise" ? "Alasan revisi (wajib)" : "Alasan/catatan (wajib)"} value={note} onChange={(e) => setNote(e.target.value)} />
@@ -110,8 +113,15 @@ export default function QuotationDetail({ params }: { params: Promise<{ id: stri
       {msg && <p className="text-sm text-red-600">{msg}</p>}
 
       {q.revisions.length > 0 && (
-        <div className="card space-y-1 text-sm"><b>Revisi sebelumnya</b>
-          {q.revisions.map((r: any) => <div key={r.rev} className="text-xs text-slate-600">rev {r.rev} · {fmtDate(r.at)} · {r.actorName} · {rupiah(r.total)} · {r.reason}</div>)}</div>
+        <div className="card space-y-1 text-sm"><b>Riwayat revisi</b>
+          <p className="text-xs text-slate-500">Isi tiap revisi lama tersimpan apa adanya dan hanya bisa dibuka (tidak bisa diubah).</p>
+          {q.revisions.map((r: any) => (
+            <Link key={r.rev} href={`/quotations/${q.id}/print?rev=${r.rev}`} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-2 py-1.5 text-xs hover:bg-slate-50 dark:border-white/10 dark:hover:bg-white/5">
+              <span><b>{r.rev === 1 ? "Awal (rev 1)" : `Rev ${r.rev}`}</b> · {rupiah(r.total)} · diganti {fmtDate(r.at)} oleh {r.actorName}{r.reason ? ` — alasan: ${r.reason}` : ""}</span>
+              <span className="shrink-0 text-brand-700 underline dark:text-white">Buka</span>
+            </Link>
+          ))}
+          <div className="px-2 text-xs text-slate-500">Rev {q.rev} = versi saat ini (di atas).</div></div>
       )}
       <div className="card space-y-1 text-sm"><b>Riwayat</b>
         <ul className="space-y-1">{[...q.events].reverse().map((e: any) => (

@@ -107,3 +107,11 @@ Sisi CRM yang sudah ada: Lead menyimpan `relatedCustomerCode` (pelanggan acuan, 
 ## Status G & H (dijawab WO, commit 622891b)
 - G: `POST /api/integrations/crm/notifications` tersedia → CRM mengirim lewat antrean `wo_outbox` (jenis NOTIFICATION; sakelar `WO_NOTIFY_ENABLED`, 404/422 dilewati tanpa diulang, WO turun → dicoba ulang).
 - H: `customer.parentCode` dipakai CRM untuk Lead non-internet "lokasi/cabang baru"; `parentCustomerCode` + `crmLeadRef` dibaca dari Export API (`crm_lead_ref` dinormalkan huruf besar). Nomor Lead = `LD-<id>` (regex `^LD-[0-9]{1,9}$`; 1 Lead = 1 kode; 409 bila dobel di WO). `crmLeadRef` yang cocok menautkan Lead internet **pasti** ke kode baru (mengalahkan tebakan; tautan manual tidak ditimpa) dan mengisi kode induk bila kosong.
+
+## I. Masukan UAT 13 Okt 2026 — bagian WO (dari sesi CRM)
+1. **(9) Label kartu penawaran di halaman order WO**: tulisan "Penawaran CRM" cukup **"Form Penawaran"** (`apps/web/src/app/(app)/work-orders/[id]/page.tsx`, judul kartu).
+2. **(11) Sewa WiFi = jasa berperangkat**: WO sudah menerima baris SERVICE yang membawa perangkat (GA memilih "Jasa + perangkat dari stok / PR proyek"; teknisi menetapkan sewa/beli). CRM tidak mengubah kontrak: baris tetap `kind: SERVICE`, marketing boleh menulis catatan baris "termasuk perangkat (sewa)".
+3. **(5) Penanda tangan penawaran**: nama diambil dari **WO → Pengaturan Formulir Berlangganan → Nama Manager** (`GET /api/subscription-settings`, `managerName`) dan gambar tanda tangan dari **WO → Branding → tanda tangan Manager** — bukan dari pengaturan CRM. Sejak commit ini CRM **menyalin nama Manager saat penawaran disetujui** (`quotations.signer_name`), jadi cetakan lama tidak ikut berganti bila Manager diganti. Mohon label kolom di WO dibuat jelas, mis. "Nama Manager (penanda tangan formulir & penawaran)".
+4. **(12)** Menu profil CRM kini "Pengaturan profil", sama dengan WO.
+5. **(3)** Sejalan dengan WO: Lead tetap milik pembuat (`marketingUserId` tunggal); rekan Marketing dicatat sebagai PIC di report; Admin tidak lagi muncul di pilihan PIC.
+6. **Nomor penawaran** kini mengikuti format Admin CRM (bawaan `QT/LIV/{BLN}/{YY}{NO}`, mis. `QT/LIV/X/260001`, berisi garis miring). Kontrak tidak berubah (`number` ≤ 60 karakter, teks bebas); mohon pastikan tampilan/pencarian WO tidak memecah nomor bergaris miring.

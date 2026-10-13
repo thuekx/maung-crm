@@ -8,6 +8,7 @@ import { requireRealAdmin } from "./auth.js";
 import { backupDir, createBackup, listBackups, overview, purgeData, readMeta, restoreBackup, safeName } from "./backup.js";
 import { loadDemo } from "./demo.js";
 import { getSetting, putSetting } from "./settings.js";
+import { formatNumber } from "./quotations.js";
 import { outboxStatus, sendTestQuotation } from "./woPush.js";
 import { reconcile } from "./reconcile.js";
 
@@ -20,10 +21,17 @@ export const adminRoutes = Router();
 adminRoutes.use("/admin", requireRealAdmin);
 
 /* ── Pengaturan CRM ── */
+/** Format nomor + nomor berikutnya tahun ini (perkiraan; nomor yang sudah terpakai dilewati saat dibuat). */
+async function numberingInfo() {
+  const f = await getSetting("numbering"), now = new Date();
+  const v = Number((await pool.query("SELECT value FROM quotation_counters WHERE year=$1", [now.getFullYear()])).rows[0]?.value ?? 0);
+  return { ...f, nextNo: v + 1, preview: formatNumber(f.template, f.digits, now, v + 1) };
+}
+
 adminRoutes.get("/admin/settings", ah(async (_req, res) => {
   const env = process.env;
   res.json({
-    quotation: await getSetting("quotation"), woSync: await getSetting("woSync"),
+    quotation: await getSetting("quotation"), woSync: await getSetting("woSync"), numbering: await numberingInfo(), bankAccounts: (await getSetting("bankAccounts")).list,
     // status integrasi (hanya baca; nilai kunci TIDAK pernah dikirim)
     integration: {
       woUrl: env.WO_URL ?? null, exportKeySet: !!env.WO_EXPORT_API_KEY, integrationKeySet: !!env.CRM_INTEGRATION_KEY, syncIntervalMin: Number(env.SYNC_INTERVAL_MIN ?? 30),
@@ -36,11 +44,36 @@ adminRoutes.put("/admin/settings", ah(async (req, res) => {
   const b = z.object({
     quotation: z.object({ taxRate: z.number().min(0).max(100), validDays: z.number().int().min(1).max(365), terms: z.string().trim().min(1).max(2000) }).optional(),
     woSync: z.object({ paused: z.boolean() }).optional(),
+    numbering: z.object({
+      template: z.string().trim().min(1).max(40).refine((t) => t.includes("{NO}"), "Format wajib memuat {NO} (nomor urut)")
+        .refine((t) => !/[{}]/.test(t.replace(/\{(BLN|MM|YYYY|YY|NO)\}/g, "")), "Token yang dikenal: {BLN} {MM} {YY} {YYYY} {NO}"),
+      digits: z.number().int().min(1).max(8),
+      nextNo: z.number().int().min(1).max(99_999_999).optional(), // nomor urut berikutnya tahun ini (menyesuaikan nomor yang sudah berjalan)
+    }).optional(),
+    bankAccounts: z.array(z.object({
+      id: z.string().trim().min(1).max(40), bankName: z.string().trim().min(2).max(80), accName: z.string().trim().min(2).max(80),
+      accNo: z.string().trim().min(3).max(40).regex(/^[0-9 .-]+$/, "No. rekening hanya angka, spasi, titik, atau strip"), isDefault: z.boolean(),
+    })).max(20).optional(),
   }).parse(req.body);
+  if (b.bankAccounts) {
+    if (new Set(b.bankAccounts.map((x) => x.id)).size !== b.bankAccounts.length) throw Object.assign(new Error("ID rekening ganda"), { status: 400 });
+    const defs = b.bankAccounts.filter((x) => x.isDefault).length;
+    if (b.bankAccounts.length && defs !== 1) throw Object.assign(new Error("Pilih tepat satu rekening bawaan"), { status: 400 });
+    await putSetting("bankAccounts", { list: b.bankAccounts }, req.user!.id);
+  }
+  if (b.numbering) {
+    const { nextNo, ...f } = b.numbering, now = new Date();
+    if (nextNo !== undefined) {
+      const n = formatNumber(f.template, f.digits, now, nextNo);
+      if ((await pool.query("SELECT 1 FROM quotations WHERE lower(number)=lower($1)", [n])).rowCount) throw Object.assign(new Error(`Nomor ${n} sudah dipakai — pilih nomor awal yang lebih besar`), { status: 409 });
+      await pool.query("INSERT INTO quotation_counters (year,value) VALUES ($1,$2) ON CONFLICT (year) DO UPDATE SET value=$2", [now.getFullYear(), nextNo - 1]);
+    }
+    await putSetting("numbering", f, req.user!.id);
+  }
   if (b.quotation) await putSetting("quotation", b.quotation, req.user!.id);
   if (b.woSync) await putSetting("woSync", b.woSync, req.user!.id);
   await aud(req, `Pengaturan CRM diubah: ${Object.keys(b).join(", ")}`);
-  res.json({ quotation: await getSetting("quotation"), woSync: await getSetting("woSync") });
+  res.json({ quotation: await getSetting("quotation"), woSync: await getSetting("woSync"), numbering: await numberingInfo(), bankAccounts: (await getSetting("bankAccounts")).list });
 }));
 
 /* ── Data & Backup ── */

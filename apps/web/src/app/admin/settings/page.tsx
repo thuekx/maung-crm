@@ -9,10 +9,15 @@ import { num } from "@/lib/money";
 export default function SettingsAdmin() {
   const [s, setS] = useState<any>(null);
   const [f, setF] = useState({ taxRate: "11", validDays: "14", terms: "" });
+  const [nf, setNf] = useState({ template: "", digits: "4", nextNo: "" });
+  const [banks, setBanks] = useState<{ id: string; bankName: string; accName: string; accNo: string; isDefault: boolean }[]>([]);
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const load = useCallback(() => api("/admin/settings").then((x) => { setS(x); setF({ taxRate: String(x.quotation.taxRate), validDays: String(x.quotation.validDays), terms: x.quotation.terms }); setErr(""); }).catch((e) => setErr(e.message)), []);
+  const load = useCallback(() => api("/admin/settings").then((x) => {
+    setS(x); setF({ taxRate: String(x.quotation.taxRate), validDays: String(x.quotation.validDays), terms: x.quotation.terms });
+    setNf({ template: x.numbering.template, digits: String(x.numbering.digits), nextNo: "" }); setBanks(x.bankAccounts); setErr("");
+  }).catch((e) => setErr(e.message)), []);
   useEffect(() => { load(); }, [load]);
   if (err) return <div className="space-y-4"><PageHeader icon="settings" title="Pengaturan CRM" /><p className="card text-sm text-red-600">{err}</p></div>;
   if (!s) return <p>Memuat…</p>;
@@ -32,6 +37,43 @@ export default function SettingsAdmin() {
         </div>
         <div><label className="lbl">Syarat &amp; ketentuan bawaan (maks. 2000 karakter)</label><textarea className="input" rows={5} value={f.terms} onChange={(e) => setF({ ...f, terms: e.target.value })} /></div>
         <button className="btn" disabled={busy || !f.terms.trim()} onClick={() => save({ quotation: { taxRate: num(f.taxRate), validDays: Math.round(num(f.validDays)), terms: f.terms.trim() } }, "Bawaan penawaran disimpan")}>Simpan</button>
+      </Section>
+
+      <Section icon="file" title="Nomor penawaran">
+        <p className="text-sm text-slate-500">Token: <code>{"{BLN}"}</code> bulan Romawi, <code>{"{MM}"}</code> bulan angka, <code>{"{YY}"}</code>/<code>{"{YYYY}"}</code> tahun, <code>{"{NO}"}</code> nomor urut (mulai lagi dari 1 tiap tahun). Nomor yang sudah dipakai selalu dilewati, jadi tidak ada nomor ganda. Marketing dapat mengisi nomor urut sendiri di penawaran draft (kosong = otomatis).</p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="sm:col-span-2"><label className="lbl">Format</label><input className="input font-mono" value={nf.template} onChange={(e) => setNf({ ...nf, template: e.target.value })} /></div>
+          <div><label className="lbl">Digit nomor urut</label><input className="input" inputMode="numeric" value={nf.digits} onChange={(e) => setNf({ ...nf, digits: e.target.value })} /></div>
+        </div>
+        <div><label className="lbl">Mulai dari nomor urut (tahun ini; kosongkan bila tidak diubah)</label>
+          <input className="input" inputMode="numeric" placeholder={`berikutnya: ${s.numbering.nextNo}`} value={nf.nextNo} onChange={(e) => setNf({ ...nf, nextNo: e.target.value })} />
+          <p className="mt-0.5 text-xs text-slate-500">Pakai untuk menyambung nomor penawaran yang sudah berjalan di luar CRM. Nomor berikutnya saat ini: <b>{s.numbering.preview}</b></p></div>
+        <button className="btn" disabled={busy || !nf.template.includes("{NO}")} onClick={() => save({ numbering: { template: nf.template.trim(), digits: Math.round(num(nf.digits)), ...(nf.nextNo.trim() ? { nextNo: Math.round(num(nf.nextNo)) } : {}) } }, "Format nomor disimpan")}>Simpan</button>
+      </Section>
+
+      <Section icon="file" title="Rekening pembayaran">
+        <p className="text-sm text-slate-500">Rekening PT yang bisa dipilih di penawaran. Rekening bawaan otomatis terpilih untuk penawaran baru. Penawaran menyimpan salinan rekening saat disimpan, jadi mengubah daftar ini tidak mengubah penawaran lama.</p>
+        {banks.map((b, i) => {
+          const upd = (p: Partial<typeof b>) => setBanks(banks.map((x, j) => (j === i ? { ...x, ...p } : p.isDefault ? { ...x, isDefault: false } : x)));
+          return (
+            <div key={b.id} className="space-y-2 rounded-lg border border-slate-200 p-2 dark:border-white/10">
+              <div><label className="lbl">Bank &amp; cabang</label><input className="input" placeholder="BANK BCA KCP Buah Batu" value={b.bankName} onChange={(e) => upd({ bankName: e.target.value })} /></div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div><label className="lbl">Atas nama</label><input className="input" placeholder="PT Lintas Satu Visi" value={b.accName} onChange={(e) => upd({ accName: e.target.value })} /></div>
+                <div><label className="lbl">No. rekening</label><input className="input" inputMode="numeric" value={b.accNo} onChange={(e) => upd({ accNo: e.target.value })} /></div>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-sm"><input type="radio" name="bank-default" checked={b.isDefault} onChange={() => upd({ isDefault: true })} />Bawaan</label>
+                <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { const rest = banks.filter((_, j) => j !== i); if (b.isDefault && rest[0]) rest[0] = { ...rest[0], isDefault: true }; setBanks(rest); }}>Hapus</button>
+              </div>
+            </div>
+          );
+        })}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-ghost" onClick={() => setBanks([...banks, { id: `b${Date.now().toString(36)}`, bankName: "", accName: "", accNo: "", isDefault: banks.length === 0 }])}>+ Tambah rekening</button>
+          <button className="btn" disabled={busy} onClick={() => save({ bankAccounts: banks.map((b) => ({ ...b, bankName: b.bankName.trim(), accName: b.accName.trim(), accNo: b.accNo.trim() })) }, "Rekening disimpan")}>Simpan rekening</button>
+        </div>
+        {banks.length === 0 && <p className="text-xs text-slate-500">Selama daftar ini kosong, cetakan penawaran memakai rekening di Pengaturan Formulir WO.</p>}
       </Section>
 
       <Section icon="sync" title="Kirim ke WO" aside={<Badge tone={i.wo.enabled ? "green" : "amber"} dot>{i.wo.enabled ? "aktif" : i.wo.paused ? "dijeda" : "nonaktif"}</Badge>}>

@@ -9,11 +9,11 @@ Prinsip: **Lead = minat layanan** (bukan orang). Satu pelanggan bisa punya banya
 | **Aktivitas** (Field Report) | Catatan kunjungan lapangan + foto + GPS + follow-up | Draft → Submit → Reviewed / Revision Required → Completed (follow-up harus selesai) |
 | **Report Baru** | Buat report: check-in GPS live, foto berlogo, PIC, hasil diskusi | Lihat Aktivitas |
 | **Lead** | Prospek internet / non-internet | lihat di bawah |
-| **Penawaran** | Quotation non-internet dari Lead | DRAFT → (ajukan) PENDING_APPROVAL → (reviewer) APPROVED → SENT → ACCEPTED/REJECTED; EXPIRED otomatis; revisi menaikkan rev |
-| **Katalog** | Jenis jasa/produk (dipakai di penawaran; di-push ke WO) | Dibuat reviewer; SKU opsional |
+| **Penawaran** | Quotation non-internet dari Lead | DRAFT → (ajukan langsung dari editor, tanpa simpan draft dulu) PENDING_APPROVAL → (reviewer) APPROVED → SENT → ACCEPTED/REJECTED; EXPIRED otomatis; revisi menaikkan rev dan isi revisi lama tersimpan baca-saja (Riwayat revisi → Buka). Nomor mengikuti format Admin; nomor urut boleh diisi manual sebelum pertama kali dikirim (tidak boleh ganda). Rekening dipilih per penawaran (disalin). Nama penanda tangan disalin dari Manager WO saat disetujui |
+| **Katalog** | Jenis jasa/produk (dipakai di penawaran; di-push ke WO) | Item baru boleh dibuat marketing (juga langsung dari penawaran: "+ Item baru"); ubah/nonaktifkan hanya reviewer; SKU opsional |
 | **Peta** | Titik kunjungan terverifikasi | Hanya koordinat valid |
 | **Lonceng** | Notifikasi dalam aplikasi | Persetujuan, review, follow-up, kedaluwarsa, kirim-WO ditolak |
-| **Admin** (Admin asli) | Pengaturan CRM, Data & Backup (backup/restore, demo, uji sambung, rekonsiliasi) | Juga tertanam di Pusat Admin WO |
+| **Admin** (Admin asli) | Pengaturan CRM (bawaan penawaran, format & nomor awal penawaran, rekening PT + bawaan), Data & Backup (backup/restore, demo, uji sambung, rekonsiliasi) | Juga tertanam di Pusat Admin WO |
 
 ## Lead — pelanggan BARU
 - **Internet:** Lead (NEW→CONTACTED→QUALIFIED) → marketing mendaftarkan di MSRadius → WO membuat pelanggan `PROSPECT` → CRM menautkan otomatis (satu kandidat, dibuat setelah Lead) → `REGISTERED → INSTALLING → WON` saat pelanggan `ACTIVE`/Online; `LOST` bila WO Pasang Baru ditolak/dibatalkan. CRM tidak menulis ke WO.
@@ -30,3 +30,6 @@ Di formulir Lead ada **"Sudah pelanggan? Cari di WO"** (nama / kode / telepon, d
 2. Marketing mengisi `crmLeadRef` pada PROSPECT baru di WO → CRM menautkan pasti, tanpa tebakan nomor/nama.
 3. Non-internet pelanggan lama: kirim `customer.code`; lokasi baru: `customer.parentCode`.
 4. Pemeriksaan WO per kode pelanggan tidak berubah.
+
+## Kerja tim pada Lead (UAT 3)
+Lead tetap milik **pembuat pertama** (satu penanggung jawab, jejak `marketingUserId` ke WO tidak berubah). Rekan Marketing yang ikut approach dicatat sebagai **PIC di Report Aktivitas** (Admin tidak ditampilkan di pilihan PIC). Reviewer dapat memindahkan pemilik Lead bila perlu. Pembagian kredit WON sebagai kerja tim belum dibuat (menunggu keputusan pemilik).

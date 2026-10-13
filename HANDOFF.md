@@ -53,3 +53,11 @@ Satu domain, satu login (Maung WO), CRM di jalur `/crm` pada VM yang sama; Caddy
 ## Tautan WO (G & H, WO commit 622891b)
 - Notifikasi lonceng → WO: antrean `wo_outbox` jenis NOTIFICATION (`notify.ts` → `woPush.ts#pushNotification`), `WO_NOTIFY_ENABLED` (compose, bawaan 1). 404/422 dilewati; baris NOTIFICATION tak memicu notifikasi "BLOCKED".
 - Lead: nomor `LD-<id>` (kartu Lead, tombol Salin); Export API `crmLeadRef`/`parentCustomerCode` → `wo_customers.crm_lead_ref/parent_customer_code` → tautan pasti di `refreshLeadLinks`. Non-internet "lokasi baru": `leads.new_location` → `customer.parentCode` pada PUT quotation. Migrasi 015.
+
+## UAT 13 Okt 2026 (CRM butir 1–12; migrasi 016)
+- Format nomor penawaran di `crm_settings.numbering` (`{BLN}{MM}{YY}{YYYY}{NO}`, bawaan `QT/LIV/{BLN}/{YY}{NO}`), nomor awal per tahun = `quotation_counters`; nomor terpakai dilewati; `seq` manual di PUT hanya draft rev 1 belum terkirim. `formatNumber` di quotations.ts.
+- Rekening PT di `crm_settings.bankAccounts` (tepat satu bawaan) → salinan `quotations.bank_account`; daftar kosong = cetak memakai rekening Pengaturan Formulir WO. `GET /crm/api/quotations/options`.
+- `quotations.signer_name` = Manager WO (`GET {WO}/api/subscription-settings` dengan token penyetuju) disalin saat approve.
+- Arsip revisi: `GET /quotations/:id/revisions/:rev`; cetak `/quotations/:id/print?rev=N` (tanda air ARSIP).
+- Katalog POST terbuka untuk semua pengguna CRM; PATCH tetap reviewer. `/pics` = MKT + diri sendiri (tanpa Admin).
+- Permintaan ke WO: bagian I di docs/PERMINTAAN-PERUBAHAN-WO.md.

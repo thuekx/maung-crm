@@ -31,7 +31,7 @@ echo "  host=$(hostname)  user=$(id -un)"
 [ "$(hostname)" = "$EXPECT_HOST" ] || fail "HOST SALAH: ini '$(hostname)', seharusnya '$EXPECT_HOST'"
 [ "$(id -u)" != 0 ] || fail "jangan dijalankan sebagai root"
 docker info >/dev/null 2>&1 || fail "docker tidak dapat diakses user ini"
-[[ "$FILTER" =~ ^[A-Za-z0-9-]*$ ]] || fail "filter hanya boleh huruf/angka/tanda minus (contoh: QT-026-0001)"
+[[ "$FILTER" =~ ^[A-Za-z0-9/-]*$ ]] || fail "filter hanya boleh huruf/angka/garis miring/tanda minus (contoh: QT/LIV/X/260001)"
 [ -n "$(dc ps -q crm-api 2>/dev/null)" ] || fail "container crm-api tidak berjalan — jalankan scripts/update.sh"
 ok "guard lolos"
 

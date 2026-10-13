@@ -159,8 +159,9 @@ export function createApp() {
 
   r.get("/me", (req, res) => res.json({ ...req.user, reviewer: isReviewer(req.user!) }));
 
-  r.get("/pics", ah(async (_req, res) => {
-    const r = await pool.query("SELECT user_id AS id, name FROM wo_user_cache WHERE role IN ('MKT','ADMIN') ORDER BY name");
+  // Pilihan PIC = rekan Marketing (Admin tidak ditampilkan; pengguna yang sedang membuat tetap ada agar bisa memilih dirinya).
+  r.get("/pics", ah(async (req, res) => {
+    const r = await pool.query("SELECT user_id AS id, name FROM wo_user_cache WHERE role='MKT' OR user_id=$1 ORDER BY name", [req.user!.id]);
     res.json(r.rows);
   }));
 

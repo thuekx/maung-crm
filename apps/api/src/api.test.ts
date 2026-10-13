@@ -18,6 +18,7 @@ const USERS: Record<string, any> = {
   tAdminActing: { id: "u-admin", name: "Admin", email: "admin@l1v.local", role: "ADMIN", subRole: "STAFF", features: ["app.crm"], acting: { role: "MKT", subRole: "STAFF" } },
 };
 let wo: http.Server, api: http.Server, base = "";
+let woManager = "M Gugi Granada"; // Pengaturan Formulir WO → nama Manager (penanda tangan penawaran)
 // Export API WO tiruan: customers dibagi 2 halaman (cursor); packages/areas = 404 (belum ada di WO); kunci salah = 401.
 
 // Pintu masuk CRM → WO tiruan mengikuti docs/API.md WO ("Integrasi CRM → WO"): kunci x-api-key, validasi isi, aturan WON terkunci/stale/duplicate.
@@ -101,6 +102,7 @@ before(async () => {
         { id: "u-luar", name: "Orang Luar", email: "luar@contoh.com", role: "MKT", subRole: "STAFF", active: true },
       ]));
     }
+    if (req.url === "/api/subscription-settings") { res.statusCode = 200; return void res.end(JSON.stringify({ managerName: woManager, bankName: "BANK WO" })); }
     if (req.url === "/api/auth/me") {
       const u = USERS[t];
       res.statusCode = u ? 200 : 401;
@@ -416,8 +418,10 @@ test("Katalog & penawaran: hitung total di server, alur status, revisi, kunci se
   const j = async (r: Response) => ({ s: r.status, d: await r.json().catch(() => ({})) as any });
   const rq = (tok: string, m: string, path: string, body?: unknown) => call(tok, m, "/crm/api" + path, body).then(j);
 
-  // katalog: hanya reviewer; nama tak boleh sama dengan paket INTERNET WO / duplikat
-  assert.equal((await rq("tNurman", "POST", "/catalog", { name: "Sewa WiFi", kind: "SERVICE", unit: "bulan", price: 100000 })).s, 403);
+  // katalog: item baru boleh ditambah marketing (mis. dari penawaran); ubah hanya reviewer; nama tak boleh sama dengan paket INTERNET WO / duplikat
+  const lan = await rq("tNurman", "POST", "/catalog", { name: "Kabel LAN Cat6", kind: "PRODUCT", unit: "meter", price: 5000 });
+  assert.equal(lan.s, 201);
+  assert.equal((await rq("tNurman", "PATCH", `/catalog/${lan.d.id}`, { price: 1 })).s, 403);
   const wifi = (await rq("tMgr", "POST", "/catalog", { name: "Sewa WiFi", kind: "SERVICE", unit: "bulan", price: 100000 })).d.id;
   const cctv = (await rq("tMgr", "POST", "/catalog", { name: "CCTV Dome 2MP", kind: "PRODUCT", unit: "unit", price: 850000 })).d.id;
   const pasang = (await rq("tMgr", "POST", "/catalog", { name: "Jasa Instalasi CCTV", kind: "SERVICE", unit: "titik", price: 150000 })).d.id;
@@ -451,7 +455,8 @@ test("Katalog & penawaran: hitung total di server, alur status, revisi, kunci se
   });
   assert.equal(created.s, 201);
   const q = created.d;
-  assert.match(q.number, /^QT-\d{3}-0001$/);
+  const now = new Date(), bln = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"][now.getMonth()];
+  assert.equal(q.number, `QT/LIV/${bln}/${String(now.getFullYear() % 100).padStart(2, "0")}0001`); // format bawaan Pengaturan CRM
   // subtotal = 4*850000 + 4*125000 + 12*100000 = 3.400.000+500.000+1.200.000 = 5.100.000; −50.000; PPN 11% = 555.500; total 5.605.500
   assert.deepEqual([q.subtotal, q.taxAmount, q.total], [5100000, 555500, 5605500]);
   assert.equal(q.lines[0].sku, "CCTV-DOME-2MP"); assert.equal(q.lines[1].sku, null); // salinan SKU di baris (null = dipetakan manual)
@@ -502,7 +507,7 @@ test("Katalog & penawaran: hitung total di server, alur status, revisi, kunci se
   // kedaluwarsa otomatis & batal & ditolak
   const l2 = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Kantor B", address: "Jl. Uji Coba No. 1, Bekasi", phone: "081377770003" })).d;
   const q2 = (await rq("tNurman", "POST", "/quotations", { leadId: l2.id, validUntil: "2099-01-01", lines: [{ catalogId: wifi, qty: 1 }] })).d;
-  assert.match(q2.number, /-0002$/);
+  assert.match(q2.number, /0002$/);
   await rq("tNurman", "POST", `/quotations/${q2.id}/submit`); await rq("tMgr", "POST", `/quotations/${q2.id}/approve`); await rq("tNurman", "POST", `/quotations/${q2.id}/send`);
   await pool.query("UPDATE quotations SET valid_until='2020-01-01' WHERE id=$1", [q2.id]);
   assert.equal((await rq("tNurman", "GET", `/quotations/${q2.id}`)).d.status, "EXPIRED");
@@ -1046,4 +1051,65 @@ test("Notifikasi → WO (POST /integrations/crm/notifications): lewat antrean, i
   assert.equal((await pool.query("SELECT count(*)::int n FROM wo_outbox WHERE status='PENDING'")).rows[0].n, 0);
   assert.equal((await pool.query("SELECT count(*)::int n FROM crm_notifications WHERE dedupe_key='k4'")).rows[0].n, 1);
   delete process.env.WO_NOTIFY_ENABLED; delete process.env.CRM_INTEGRATION_KEY;
+});
+
+test("UAT penawaran: format nomor Admin + mulai + manual tanpa ganda, rekening dipilih & disalin, arsip revisi baca-saja, penanda tangan disalin saat disetujui, PIC tanpa Admin", async () => {
+  const j = async (r: Response) => ({ s: r.status, d: await r.json().catch(() => ({})) as any });
+  const rq = (tok: string, m: string, path: string, body?: unknown) => call(tok, m, "/crm/api" + path, body).then(j);
+  const now = new Date(), bln = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"][now.getMonth()], yy = String(now.getFullYear() % 100).padStart(2, "0");
+  await pool.query("INSERT INTO wo_user_cache (user_id,name,email,role) VALUES ('u-admin','Admin','admin@l1v.local','ADMIN') ON CONFLICT (user_id) DO NOTHING");
+
+  // PIC report: rekan MKT, tanpa Admin (kecuali dirinya sendiri)
+  const pics = (await rq("tNurman", "GET", "/pics")).d.map((p: any) => p.id);
+  assert.ok(pics.includes("u-nurman") && !pics.includes("u-admin"));
+  assert.ok((await rq("tAdmin", "GET", "/pics")).d.some((p: any) => p.id === "u-admin"));
+
+  // format nomor: wajib {NO}, token dikenal; mulai dari nomor tertentu; nomor berikutnya ditampilkan
+  assert.equal((await rq("tAdmin", "PUT", "/admin/settings", { numbering: { template: "QT/LIV/{BLN}", digits: 4 } })).s, 400);
+  assert.equal((await rq("tAdmin", "PUT", "/admin/settings", { numbering: { template: "QT/{X}/{NO}", digits: 4 } })).s, 400);
+  const set = await rq("tAdmin", "PUT", "/admin/settings", { numbering: { template: "QT/LIV/{BLN}/{YY}{NO}", digits: 4, nextNo: 120 } });
+  assert.equal(set.s, 200); assert.equal(set.d.numbering.preview, `QT/LIV/${bln}/${yy}0120`);
+  assert.equal((await rq("tMgr", "PUT", "/admin/settings", { numbering: { template: "X{NO}", digits: 2 } })).s, 403);
+
+  // rekening: tepat satu bawaan; penawaran baru memakai bawaan; bisa dipilih; salinan tidak berubah bila pengaturan diubah
+  const bca = { id: "bca", bankName: "BANK BCA KCP Buah Batu", accName: "PT Lintas Satu Visi", accNo: "7753555511", isDefault: true };
+  const mdr = { id: "mdr", bankName: "BANK MANDIRI KCP Dago", accName: "PT Lintas Satu Visi", accNo: "1300012345678", isDefault: false };
+  assert.equal((await rq("tAdmin", "PUT", "/admin/settings", { bankAccounts: [{ ...bca, isDefault: false }, mdr] })).s, 400);
+  assert.equal((await rq("tAdmin", "PUT", "/admin/settings", { bankAccounts: [bca, { ...mdr, accNo: "abc" }] })).s, 400);
+  assert.equal((await rq("tAdmin", "PUT", "/admin/settings", { bankAccounts: [bca, mdr] })).s, 200);
+  assert.equal((await rq("tNurman", "GET", "/quotations/options")).d.bankAccounts.length, 2);
+
+  const item = (await rq("tNurman", "POST", "/catalog", { name: "Access Point EW1200", kind: "PRODUCT", unit: "unit", price: 750000 })).d.id;
+  const lead = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Kafe Uji", address: "Jl. Uji UAT No. 9, Bandung", phone: "081377770099" })).d;
+  const a = (await rq("tNurman", "POST", "/quotations", { leadId: lead.id, lines: [{ catalogId: item, qty: 2 }] })).d;
+  assert.equal(a.number, `QT/LIV/${bln}/${yy}0120`); assert.equal(a.seq, 120); assert.equal(a.numberEditable, true);
+  assert.equal(a.bankAccount.accNo, "7753555511");
+  // nomor manual: dipakai bila belum ada; ganda ditolak; nomor otomatis berikutnya melewati yang sudah terpakai
+  assert.equal((await rq("tNurman", "PUT", `/quotations/${a.id}`, { seq: 121, bankAccountId: "mdr" })).d.number, `QT/LIV/${bln}/${yy}0121`);
+  const b = (await rq("tNurman", "POST", "/quotations", { leadId: lead.id, lines: [{ catalogId: item, qty: 1 }] })).d;
+  assert.equal(b.number, `QT/LIV/${bln}/${yy}0122`); // 0121 sudah terpakai → dilewati
+  assert.equal((await rq("tNurman", "PUT", `/quotations/${b.id}`, { seq: 121 })).s, 409);
+  assert.equal((await rq("tNurman", "PUT", `/quotations/${b.id}`, { bankAccountId: "tidak-ada" })).s, 400);
+  assert.equal((await rq("tNurman", "PUT", `/quotations/${b.id}`, { bankAccountId: "" })).d.bankAccount, null);
+  await rq("tAdmin", "PUT", "/admin/settings", { bankAccounts: [{ ...mdr, accNo: "999", isDefault: true }] });
+  assert.equal((await rq("tNurman", "GET", `/quotations/${a.id}`)).d.bankAccount.accNo, "1300012345678"); // salinan tetap
+
+  // ajukan → disetujui: nama Manager WO disalin; nomor terkunci setelah dikirim
+  await rq("tNurman", "POST", `/quotations/${a.id}/submit`);
+  assert.equal((await rq("tMgr", "POST", `/quotations/${a.id}/approve`)).d.signerName, "M Gugi Granada");
+  woManager = "Manager Baru";
+  assert.equal((await rq("tNurman", "GET", `/quotations/${a.id}`)).d.signerName, "M Gugi Granada"); // cetakan lama tidak ikut berganti
+  await rq("tNurman", "POST", `/quotations/${a.id}/send`);
+  const r2 = (await rq("tNurman", "POST", `/quotations/${a.id}/revise`, { note: "Tambah 1 unit" })).d;
+  assert.equal(r2.numberEditable, false);
+  assert.equal((await rq("tNurman", "PUT", `/quotations/${a.id}`, { seq: 500 })).s, 409);
+  await rq("tNurman", "PUT", `/quotations/${a.id}`, { lines: [{ catalogId: item, qty: 3 }] });
+  // arsip revisi: isi lama utuh, baca-saja (tidak ada rute ubah), cakupan sama dengan penawaran
+  const old = await rq("tNurman", "GET", `/quotations/${a.id}/revisions/1`);
+  assert.equal(old.s, 200); assert.equal(old.d.lines[0].qty, 2); assert.equal(old.d.archived.rev, 1); assert.equal(old.d.archived.currentRev, 2); assert.equal(old.d.archived.reason, "Tambah 1 unit");
+  assert.equal(old.d.status, "SENT");
+  assert.equal((await rq("tNurman", "GET", `/quotations/${a.id}/revisions/9`)).s, 404);
+  assert.equal((await rq("tRasyad", "GET", `/quotations/${a.id}/revisions/1`)).s, 404);
+  assert.equal((await rq("tNurman", "PUT", `/quotations/${a.id}/revisions/1`, { subject: "x" })).s, 404);
+  woManager = "M Gugi Granada";
 });

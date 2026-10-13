@@ -92,7 +92,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-2 px-1">
             <Link href="/profile" className="flex min-w-0 flex-1 items-center gap-2 rounded-lg p-1 hover:bg-white/5" title="Profil saya">
               <Avatar name={name || "?"} size={34} url={me?.avatarUrl} />
-              <span className="min-w-0"><span className="block truncate text-sm">{name || "…"}</span><span className="block truncate text-[10px] text-white/50">Profil &amp; password</span></span>
+              <span className="min-w-0"><span className="block truncate text-sm">{name || "…"}</span><span className="block truncate text-[10px] text-white/50">Pengaturan profil</span></span>
             </Link>
             {themeBtn("rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white")}
             <button className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white" aria-label="Keluar" title="Keluar" onClick={logout}><Icon name="logout" size={18} /></button>
@@ -117,7 +117,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <div className="fixed inset-0 z-[1100]" onClick={() => setMenu(false)} />
                 <div className="absolute right-0 top-full z-[1200] mt-2 w-56 overflow-hidden rounded-xl bg-white text-sm text-slate-800 shadow-xl dark:bg-brand-900 dark:text-slate-100">
                   <div className="border-b border-slate-100 px-3 py-2 dark:border-white/10"><div className="truncate font-semibold">{name || "…"}</div><div className="truncate text-xs text-slate-500">{me?.email}</div></div>
-                  <Link href="/profile" onClick={() => setMenu(false)} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-white/5"><Icon name="user" size={16} />Profil &amp; ganti password</Link>
+                  <Link href="/profile" onClick={() => setMenu(false)} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-white/5"><Icon name="user" size={16} />Pengaturan profil</Link>
                   <button onClick={logout} className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-white/5"><Icon name="logout" size={16} />Keluar</button>
                 </div>
               </>
