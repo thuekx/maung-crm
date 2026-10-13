@@ -44,11 +44,11 @@ export async function enqueueBackfill(): Promise<number> {
 
 class PushError extends Error { constructor(public http: number | null, msg: string, public permanent: boolean) { super(msg); } }
 
-async function put(path: string, body: unknown): Promise<{ http: number; data: any }> {
+async function put(path: string, body: unknown, method: "PUT" | "POST" = "PUT"): Promise<{ http: number; data: any }> {
   let r: Response;
   try {
     r = await fetch(`${WO_URL()}/api/integrations/crm/${path}`, {
-      method: "PUT", headers: { "x-api-key": KEY(), "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000),
+      method, headers: { "x-api-key": KEY(), "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000),
     });
   } catch (e) { throw new PushError(null, `WO tidak terjangkau: ${(e as Error).name === "TimeoutError" ? "batas waktu" : "jaringan"}`, false); }
   const data: any = await r.json().catch(() => ({}));
@@ -130,6 +130,19 @@ export async function sendTestQuotation(id: number): Promise<{ ok: boolean; mess
   }
 }
 
+/** Notifikasi dalam aplikasi → WO (`POST /api/integrations/crm/notifications`, idempoten menurut (userId, dedupeKey)). 404 (pengguna tak ada/nonaktif) & 422 tidak diulang. */
+async function pushNotification(id: number) {
+  const n = (await pool.query("SELECT * FROM crm_notifications WHERE id=$1", [id])).rows[0];
+  if (!n) return { skipped: true };
+  try {
+    const r = await put("notifications", { userId: n.user_id, type: n.type, title: n.title, body: n.body ?? undefined, link: n.href ? `/crm${n.href}` : undefined, dedupeKey: n.dedupe_key ?? `n-${n.id}` }, "POST");
+    return { http: r.http, data: r.data };
+  } catch (e) {
+    if (e instanceof PushError && (e.http === 404 || e.http === 422)) return { skipped: true, http: e.http, data: { skipped: e.http === 404 ? "pengguna tidak ada/nonaktif di WO" : "isi ditolak WO", error: e.message } };
+    throw e;
+  }
+}
+
 const backoffMin = (attempts: number) => Math.min(60, 2 ** Math.min(attempts, 6)); // 1,2,4,8,16,32,60 menit
 
 let running = false;
@@ -143,13 +156,14 @@ export async function processOutbox(): Promise<{ done: number; blocked: number; 
     const due = await pool.query(`SELECT * FROM wo_outbox WHERE status='PENDING' AND next_attempt_at <= now() ORDER BY (kind='QUOTATION'), id LIMIT 100`);
     // pengaman ganda: baris outbox milik data demo (mis. dibuat sebelum penanda) ditutup tanpa menghubungi WO
     for (const j of due.rows) {
+      if (j.kind === "NOTIFICATION") continue;
       const d = await pool.query(j.kind === "CATALOG" ? "SELECT is_demo FROM catalog_items WHERE id=$1" : "SELECT is_demo FROM quotations WHERE id=$1", [j.ref_id]);
       if (d.rows[0]?.is_demo) { await pool.query(`UPDATE wo_outbox SET status='DONE', response='{"skipped":"demo"}', done_at=now(), updated_at=now() WHERE id=$1`, [j.id]); j.skip = true; }
     }
     due.rows = due.rows.filter((j: any) => !j.skip);
     for (const job of due.rows) {
       try {
-        const r = job.kind === "CATALOG" ? await pushCatalog(Number(job.ref_id)) : await pushQuotation(Number(job.ref_id));
+        const r = job.kind === "CATALOG" ? await pushCatalog(Number(job.ref_id)) : job.kind === "NOTIFICATION" ? await pushNotification(Number(job.ref_id)) : await pushQuotation(Number(job.ref_id));
         await pool.query(`UPDATE wo_outbox SET status='DONE', attempts=attempts+1, last_http=$2, last_error=NULL, response=$3, done_at=now(), updated_at=now() WHERE id=$1`,
           [job.id, (r as any).http ?? null, JSON.stringify((r as any).data ?? { skipped: (r as any).skipped ?? true })]);
         out.done++;

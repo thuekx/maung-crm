@@ -103,3 +103,7 @@ Fakta dasar: di WO satu **kode pelanggan = satu layanan/lokasi**. Layanan intern
 6. Pemeriksaan WO berdasarkan `customerCode` tidak berubah: alur Pasang Baru/Online tetap per kode baru; CRM hanya membaca statusnya (`PROSPECT → INSTALLING → ACTIVE`/`REJECTED|CANCELLED`).
 
 Sisi CRM yang sudah ada: Lead menyimpan `relatedCustomerCode` (pelanggan acuan, dipilih lewat pencarian cermin WO) terpisah dari `customerCode` (kode layanan yang dilacak).
+
+## Status G & H (dijawab WO, commit 622891b)
+- G: `POST /api/integrations/crm/notifications` tersedia → CRM mengirim lewat antrean `wo_outbox` (jenis NOTIFICATION; sakelar `WO_NOTIFY_ENABLED`, 404/422 dilewati tanpa diulang, WO turun → dicoba ulang).
+- H: `customer.parentCode` dipakai CRM untuk Lead non-internet "lokasi/cabang baru"; `parentCustomerCode` + `crmLeadRef` dibaca dari Export API (`crm_lead_ref` dinormalkan huruf besar). Nomor Lead = `LD-<id>` (regex `^LD-[0-9]{1,9}$`; 1 Lead = 1 kode; 409 bila dobel di WO). `crmLeadRef` yang cocok menautkan Lead internet **pasti** ke kode baru (mengalahkan tebakan; tautan manual tidak ditimpa) dan mengisi kode induk bila kosong.

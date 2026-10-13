@@ -30,8 +30,11 @@ const createSchema = z.object({
   email: opt(120), address: opt(300), area: opt(80), interest: opt(200), source: opt(80), notes: opt(2000),
   ownerId: z.string().optional(),
   relatedCustomerCode: opt(40), // pelanggan WO existing yang menjadi acuan (layanan baru/tambahan)
+  newLocation: z.boolean().optional(), // non-internet: lokasi/cabang baru di bawah akun induk (bukan pelanggan yang sama)
 });
-const patchSchema = createSchema.omit({ kind: true, relatedCustomerCode: true }).partial();
+const patchSchema = createSchema.omit({ kind: true, relatedCustomerCode: true, newLocation: true }).partial();
+/** Nomor Lead yang dipakai di WO (kolom crmLeadRef): LD-<id>. */
+export const leadRef = (id: number | string) => `LD-${id}`;
 
 /** Pemilik/pembuat melihat miliknya; reviewer (ADMIN / MKT MANAGER|SUPERVISOR) melihat semua. */
 const scope = (u: Principal, args: unknown[]) => {
@@ -116,6 +119,14 @@ export async function refreshLeadLinks(): Promise<{ linked: number; moved: numbe
   let linked = 0, moved = 0;
   const open = await pool.query("SELECT * FROM leads WHERE deleted_at IS NULL AND NOT is_demo AND kind='INTERNET' AND stage = ANY($1) ORDER BY id", [OPEN]);
   for (const lead of open.rows) {
+    // Tautan pasti: Marketing mengisi nomor Lead (LD-<id>) pada pelanggan di WO (Export API crmLeadRef). Mengalahkan tebakan nomor/nama; tautan manual tidak ditimpa.
+    if (lead.link_state !== "MANUAL") {
+      const ref = (await pool.query("SELECT code, parent_customer_code FROM wo_customers WHERE crm_lead_ref=$1 LIMIT 1", [leadRef(lead.id)])).rows[0];
+      if (ref && ref.code !== lead.customer_code) {
+        await applyLink(pool, lead.id, ref.code, "AUTO", null); lead.customer_code = ref.code; linked++;
+        if (ref.parent_customer_code && !lead.related_customer_code) await pool.query("UPDATE leads SET related_customer_code=$2, existing_customer=true WHERE id=$1", [lead.id, ref.parent_customer_code]);
+      }
+    }
     if (!lead.customer_code && lead.link_state === "NONE" && lead.phone) {
       const m = await lookupByPhone(lead.phone);
       const pick = pickAuto("INTERNET", lead.created_at, lead.related_customer_code ? m.exact.filter((c: any) => c.code !== lead.related_customer_code) : m.exact);
@@ -147,6 +158,7 @@ leadRoutes.post("/", ah(async (req, res) => {
   }
   // Pelanggan acuan tidak boleh ikut dipilih otomatis: layanan baru internet = kode pelanggan BARU yang dibuat WO.
   const exactCands = related && b.kind === "INTERNET" ? m.exact.filter((c: any) => c.code !== related.code) : m.exact;
+  const sameCustomer = !!related && b.kind === "NON_INTERNET" && !b.newLocation;
   const auto = related && b.kind === "NON_INTERNET" ? null : pickAuto(b.kind, now, exactCands);
   const existing = !!related || (b.kind === "INTERNET" && m.exact.some((c: any) => c.status === "ACTIVE" || c.status === "SUSPENDED" || c.status === "NEED_CHECK"));
   const dupes = (await pool.query("SELECT id, name, stage, owner_name AS \"ownerName\" FROM leads WHERE deleted_at IS NULL AND stage = ANY($1) AND phone_norm IS NOT DISTINCT FROM $2 AND ($2::text IS NOT NULL OR phone_digits=$3) ORDER BY id DESC LIMIT 5", [OPEN, p.e164, p.digits])).rows;
@@ -155,12 +167,12 @@ leadRoutes.post("/", ah(async (req, res) => {
   try {
     await c.query("BEGIN");
     const r = await c.query(
-      `INSERT INTO leads (kind,name,phone,phone_norm,phone_digits,email,address,area,interest,source,notes,owner_id,owner_name,existing_customer,created_by,created_by_name,created_at,related_customer_code)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
-      [b.kind, b.name, b.phone, p.e164, p.digits || null, b.email ?? null, b.address ?? null, b.area ?? null, b.interest ?? null, b.source ?? null, b.notes ?? null, ownerId, ownerName, existing, u.id, u.name, now, related?.code ?? null]);
+      `INSERT INTO leads (kind,name,phone,phone_norm,phone_digits,email,address,area,interest,source,notes,owner_id,owner_name,existing_customer,created_by,created_by_name,created_at,related_customer_code,new_location)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
+      [b.kind, b.name, b.phone, p.e164, p.digits || null, b.email ?? null, b.address ?? null, b.area ?? null, b.interest ?? null, b.source ?? null, b.notes ?? null, ownerId, ownerName, existing, u.id, u.name, now, related?.code ?? null, !!related && b.kind === "NON_INTERNET" && !!b.newLocation]);
     id = r.rows[0].id;
     await event(c, id, "CREATED", { to: "NEW", actor: u });
-    if (related && b.kind === "NON_INTERNET") await applyLink(c, id, related.code, "MANUAL", u); // layanan non-internet: order jasa ditautkan ke pelanggan yang dipilih (bukan membuat pelanggan baru)
+    if (sameCustomer) await applyLink(c, id, related.code, "MANUAL", u); // layanan non-internet: order jasa ditautkan ke pelanggan yang dipilih (bukan membuat pelanggan baru)
     if (auto) {
       await applyLink(c, id, auto.code, "AUTO", u);
       if (b.kind === "INTERNET") await followCustomer(c, { id, kind: b.kind, customer_code: auto.code, stage: "NEW", created_at: now });
@@ -182,7 +194,7 @@ async function detail(l: any) {
   return {
     id: l.id, kind: l.kind, stage: l.stage, name: l.name, phone: l.phone, phoneNorm: l.phone_norm, email: l.email, address: l.address, area: l.area,
     interest: l.interest, source: l.source, notes: l.notes, ownerId: l.owner_id, ownerName: l.owner_name, createdBy: l.created_by, createdByName: l.created_by_name,
-    customerCode: l.customer_code, linkState: l.link_state, existingCustomer: l.existing_customer, relatedCustomerCode: l.related_customer_code ?? null, relatedCustomer: related,
+    customerCode: l.customer_code, linkState: l.link_state, existingCustomer: l.existing_customer, relatedCustomerCode: l.related_customer_code ?? null, relatedCustomer: related, newLocation: !!l.new_location, ref: leadRef(l.id),
     lostReason: l.lost_reason, lostAuto: l.lost_auto, wonAt: l.won_at, closedAt: l.closed_at, createdAt: l.created_at, updatedAt: l.updated_at,
     customer: cust.rows[0] ?? null, events: events.rows, stages: STAGES[l.kind as Kind], manualStages: MANUAL[l.kind as Kind],
   };

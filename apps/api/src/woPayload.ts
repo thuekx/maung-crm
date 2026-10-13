@@ -51,7 +51,7 @@ export function quotationWoPayload(q: Q, extra: { areaCode?: string | null; demo
     validUntil: q.validUntil ?? undefined, sentAt: q.sentAt ?? undefined, decidedAt: q.decidedAt ?? undefined,
     lostReason: status === "LOST" ? (q.decisionNote ?? (q.status === "EXPIRED" ? "Masa berlaku berakhir" : undefined)) : undefined,
     marketingUserId: q.marketingUserId, marketingName: q.marketingName,
-    customer: { code: q.customerCode ?? undefined, name: q.customerName, phone, email, address: q.customerAddress ?? "", areaCode: extra.areaCode ?? undefined, picName: q.picName ?? undefined },
+    customer: { code: q.customerCode ?? undefined, parentCode: !q.customerCode && q.lead?.newLocation && q.lead.relatedCustomerCode ? q.lead.relatedCustomerCode : undefined, name: q.customerName, phone, email, address: q.customerAddress ?? "", areaCode: extra.areaCode ?? undefined, picName: q.picName ?? undefined },
     lines: q.lines.map((l) => ({ catalogCrmId: `catalog-${l.catalogId}`, sku: l.sku ?? undefined, name: l.name, kind: l.kind, qty: l.qty, unit: l.unit, unitPrice: l.unitPrice, note: l.note ?? undefined })),
     total: q.total,
     taxNote: `PPN ${q.taxRate}%${q.discount > 0 ? `; diskon Rp ${Math.round(q.discount).toLocaleString("id-ID")}` : ""}`.slice(0, 200),

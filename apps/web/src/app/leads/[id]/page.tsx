@@ -46,7 +46,7 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
         <h1 className="font-display text-xl font-semibold">Ubah Lead</h1>
         <LeadForm initial={{ name: l.name, phone: l.phone ?? "", email: l.email ?? "", address: l.address ?? "", area: l.area ?? "", interest: l.interest ?? "", source: l.source ?? "", notes: l.notes ?? "" }}
           submitLabel="Simpan perubahan" onSubmit={async (f) => {
-            const { kind: _k, ...rest } = f;
+            const { kind: _k, newLocation: _n, relatedCustomerCode: _r, ...rest } = f;
             await api(`/leads/${id}`, { method: "PATCH", json: Object.fromEntries(Object.entries(rest).map(([k, v]) => [k, v.trim()])) });
             setEdit(false); await load();
           }} />
@@ -82,6 +82,11 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
       </div>
 
       <Section icon="link" title="Pelanggan di WO">
+        <p className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+          Nomor Lead: <code className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold dark:bg-white/10">{l.ref}</code>
+          <button type="button" className="btn-ghost !px-2 !py-0.5 text-xs" onClick={() => { void navigator.clipboard?.writeText(l.ref).then(() => setMsg("Nomor Lead disalin"), () => setMsg(l.ref)); }}>Salin</button>
+          {l.kind === "INTERNET" && !l.customerCode && <span>— isi di kartu "Akun & tautan CRM" pelanggan di WO agar CRM menautkan pasti.</span>}
+        </p>
         {l.relatedCustomer && (
           <p className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
             Layanan {l.kind === "INTERNET" ? "internet baru" : "tambahan"} untuk pelanggan <b>{l.relatedCustomer.name ?? l.relatedCustomer.code}</b> ({l.relatedCustomer.code}{l.relatedCustomer.packageName ? ` · ${l.relatedCustomer.packageName}` : ""}) — acuan saja; status lead mengikuti {l.kind === "INTERNET" ? "kode pelanggan baru di bawah" : "penawaran"}.

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { CUST_STATUS, KIND } from "@/lib/leads";
 
-export interface LeadFields { kind: string; name: string; phone: string; email: string; address: string; area: string; interest: string; source: string; notes: string; relatedCustomerCode: string }
+export interface LeadFields { kind: string; name: string; phone: string; email: string; address: string; area: string; interest: string; source: string; notes: string; relatedCustomerCode: string; newLocation?: boolean }
 const EMPTY: LeadFields = { kind: "INTERNET", name: "", phone: "", email: "", address: "", area: "", interest: "", source: "", notes: "", relatedCustomerCode: "" };
 
 export default function LeadForm({ initial, submitLabel, onSubmit }: { initial?: Partial<LeadFields>; submitLabel: string; onSubmit: (f: LeadFields) => Promise<void> }) {
@@ -34,7 +34,7 @@ export default function LeadForm({ initial, submitLabel, onSubmit }: { initial?:
     setPicked(c); setQ(""); setFound(null);
     setF((p) => ({ ...p, relatedCustomerCode: c.code, name: p.name || c.name, phone: p.phone || c.phone || "", email: p.email || c.email || "", address: p.address || c.address || "", area: p.area || c.areaName || "" }));
   };
-  const unpick = () => { setPicked(null); setF((p) => ({ ...p, relatedCustomerCode: "" })); };
+  const unpick = () => { setPicked(null); setF((p) => ({ ...p, relatedCustomerCode: "", newLocation: false })); };
   // Petunjuk langsung: apakah nomor ini sudah milik pelanggan WO?
   useEffect(() => {
     setHint(null);
@@ -69,7 +69,10 @@ export default function LeadForm({ initial, submitLabel, onSubmit }: { initial?:
           {picked ? (
             <div className="flex items-start justify-between gap-2 text-sm">
               <span><b>{picked.name}</b> <span className="text-slate-500">· {picked.code} · {CUST_STATUS[picked.status] ?? picked.status}{picked.packageName ? ` · ${picked.packageName}` : ""}</span>
-                <span className="mt-0.5 block text-xs text-slate-500">{f.kind === "INTERNET" ? "Layanan internet baru: WO akan membuat kode pelanggan baru; pelanggan ini hanya menjadi acuan." : "Layanan non-internet: penawaran/order ditautkan ke pelanggan ini (tidak membuat pelanggan baru)."}</span></span>
+                <span className="mt-0.5 block text-xs text-slate-500">{f.kind === "INTERNET" ? "Layanan internet baru: WO akan membuat kode pelanggan baru; pelanggan ini hanya menjadi acuan. Setelah terdaftar, isi nomor Lead (LD-…) di kartu \"Akun & tautan CRM\" pelanggan baru di WO agar tertaut pasti." : f.newLocation ? "Lokasi/cabang baru: WO membuat pelanggan baru di bawah akun induk ini." : "Layanan non-internet: penawaran/order ditautkan ke pelanggan ini (tidak membuat pelanggan baru)."}</span>
+                {f.kind === "NON_INTERNET" && (
+                  <label className="mt-1 flex items-center gap-2 text-xs"><input type="checkbox" checked={!!f.newLocation} onChange={(e) => setF((p) => ({ ...p, newLocation: e.target.checked }))} />Ini lokasi/cabang baru (pelanggan baru di bawah akun ini)</label>
+                )}</span>
               <button type="button" className="btn-ghost shrink-0 !px-2 !py-1 text-xs" onClick={unpick}>Lepas</button>
             </div>
           ) : (

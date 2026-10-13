@@ -49,3 +49,7 @@ Satu domain, satu login (Maung WO), CRM di jalur `/crm` pada VM yang sama; Caddy
 - Tabel `crm_notifications` (migrasi 013), API `GET /crm/api/notifications`, `POST /crm/api/notifications/read` ({ids?}); `notify.ts` (kegagalan tak pernah menggagalkan proses utama, dedupe_key mencegah ganda). Baris demo tidak menghasilkan notifikasi.
 - Pemicu: penawaran diajukan→reviewer; disetujui/dikembalikan→pemilik; report submit→reviewer; review/revisi/selesai→pembuat; komentar→pihak lain; follow-up baru→PIC. Sweep tiap jam: follow-up jatuh tempo/terlambat→PIC, penawaran SENT ≤3 hari kedaluwarsa→pemilik, antrean WO BLOCKED→Admin.
 - Push Telegram/email lewat WO: diminta di docs/PERMINTAAN-PERUBAHAN-WO.md bagian G (menunggu commit WO). Alur CRM per menu & pelanggan existing: docs/ALUR-CRM.md; Lead menyimpan related_customer_code (migrasi 014).
+
+## Tautan WO (G & H, WO commit 622891b)
+- Notifikasi lonceng → WO: antrean `wo_outbox` jenis NOTIFICATION (`notify.ts` → `woPush.ts#pushNotification`), `WO_NOTIFY_ENABLED` (compose, bawaan 1). 404/422 dilewati; baris NOTIFICATION tak memicu notifikasi "BLOCKED".
+- Lead: nomor `LD-<id>` (kartu Lead, tombol Salin); Export API `crmLeadRef`/`parentCustomerCode` → `wo_customers.crm_lead_ref/parent_customer_code` → tautan pasti di `refreshLeadLinks`. Non-internet "lokasi baru": `leads.new_location` → `customer.parentCode` pada PUT quotation. Migrasi 015.

@@ -68,10 +68,11 @@ async function syncCustomers() {
       code: s(r.code), name: s(r.name), phone: s(r.phone), phone_norm: p.e164, phone_digits: p.digits || null, phone_suffix: phoneSuffix(p),
       email: s(r.email), address: s(r.address), package_name: s(r.packageName), status: s(r.status), radius_status: s(r.radiusStatus),
       sales_name: s(r.salesName), area_name: s(r.areaName), wo_source: s(r.source), activated_at: t(r.activatedAt), wo_created_at: t(r.createdAt),
+      parent_customer_code: s(r.parentCustomerCode), crm_lead_ref: s(r.crmLeadRef)?.toUpperCase() ?? null,
     };
   });
-  const cols = "code,name,phone,phone_norm,phone_digits,phone_suffix,email,address,package_name,status,radius_status,sales_name,area_name,wo_source,activated_at,wo_created_at";
-  const rec = "code text,name text,phone text,phone_norm text,phone_digits text,phone_suffix text,email text,address text,package_name text,status text,radius_status text,sales_name text,area_name text,wo_source text,activated_at timestamptz,wo_created_at timestamptz";
+  const cols = "code,name,phone,phone_norm,phone_digits,phone_suffix,email,address,package_name,status,radius_status,sales_name,area_name,wo_source,activated_at,wo_created_at,parent_customer_code,crm_lead_ref";
+  const rec = "code text,name text,phone text,phone_norm text,phone_digits text,phone_suffix text,email text,address text,package_name text,status text,radius_status text,sales_name text,area_name text,wo_source text,activated_at timestamptz,wo_created_at timestamptz,parent_customer_code text,crm_lead_ref text";
   await replaceAll("wo_customers", "code", cols, rec, rows, upd(cols.split(",").slice(1)));
   return rows.length;
 }
@@ -84,10 +85,11 @@ async function syncSubscriptions() {
       reg_no: s(r.regNo), form_date: t(r.formDate), name: s(r.name), phone: s(r.phone), phone_norm: p.e164, phone_digits: p.digits || null,
       address: s(r.address), package_name: s(r.packageName), source: s(r.source), marketing_name: s(r.marketingName),
       customer_code: s(r.customerCode), wo_number: s(r.woNumber), wo_created_at: t(r.createdAt),
+      parent_customer_code: s(r.parentCustomerCode), crm_lead_ref: s(r.crmLeadRef)?.toUpperCase() ?? null,
     };
   });
-  const cols = "reg_no,form_date,name,phone,phone_norm,phone_digits,address,package_name,source,marketing_name,customer_code,wo_number,wo_created_at";
-  const rec = "reg_no text,form_date timestamptz,name text,phone text,phone_norm text,phone_digits text,address text,package_name text,source text,marketing_name text,customer_code text,wo_number text,wo_created_at timestamptz";
+  const cols = "reg_no,form_date,name,phone,phone_norm,phone_digits,address,package_name,source,marketing_name,customer_code,wo_number,wo_created_at,parent_customer_code,crm_lead_ref";
+  const rec = "reg_no text,form_date timestamptz,name text,phone text,phone_norm text,phone_digits text,address text,package_name text,source text,marketing_name text,customer_code text,wo_number text,wo_created_at timestamptz,parent_customer_code text,crm_lead_ref text";
   await replaceAll("wo_subscriptions", "reg_no", cols, rec, rows, upd(cols.split(",").slice(1)));
   return rows.length;
 }

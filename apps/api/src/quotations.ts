@@ -95,7 +95,7 @@ export async function detail(q: any) {
     pool.query(`SELECT id, position, catalog_id AS "catalogId", name, sku, kind, unit, qty, unit_price AS "unitPrice", note FROM quotation_lines WHERE quotation_id=$1 ORDER BY position`, [q.id]),
     pool.query(`SELECT id, type, from_status AS "fromStatus", to_status AS "toStatus", note, actor_name AS "actorName", at FROM quotation_events WHERE quotation_id=$1 ORDER BY at, id`, [q.id]),
     pool.query(`SELECT rev, reason, actor_name AS "actorName", at, snapshot->>'total' AS total, snapshot->>'status' AS status FROM quotation_revisions WHERE quotation_id=$1 ORDER BY rev`, [q.id]),
-    pool.query(`SELECT id, name, stage, kind, customer_code AS "customerCode" FROM leads WHERE id=$1`, [q.lead_id]),
+    pool.query(`SELECT id, name, stage, kind, customer_code AS "customerCode", related_customer_code AS "relatedCustomerCode", new_location AS "newLocation" FROM leads WHERE id=$1`, [q.lead_id]),
   ]);
   const n = (v: unknown) => Number(v);
   return {

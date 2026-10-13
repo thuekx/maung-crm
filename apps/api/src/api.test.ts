@@ -25,7 +25,7 @@ const CRM_KEY = "k-test-crm-integration";
 let woMode: string = "ok";
 let woOrderSeq = 0;
 const woCalls: { method: string; path: string; body: any }[] = [];
-const woCatalog = new Map<string, any>(), woQuotes = new Map<string, any>();
+const woCatalog = new Map<string, any>(), woQuotes = new Map<string, any>(), woNotes: any[] = [];
 const crmMock = (req: http.IncomingMessage, res: http.ServerResponse) => {
   let raw = "";
   req.on("data", (c) => (raw += c));
@@ -37,6 +37,14 @@ const crmMock = (req: http.IncomingMessage, res: http.ServerResponse) => {
       const all = [...woQuotes.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([crmId, b]) => ({ crmId, number: b.number, rev: b.rev, status: b.status, total: b.total, demo: !!b.demo, marketingUserId: b.marketingUserId, marketingName: b.marketingName, customerCode: null, lineCount: b.lines.length, woNumber: b.woNumber ?? null, woStatus: null, updatedAt: new Date().toISOString() }));
       const cur = new URL(req.url!, "http://x").searchParams.get("cursor"); const st = cur ? all.findIndex((x) => x.crmId === cur) + 1 : 0;
       return send(200, { count: Math.min(2, all.length - st), nextCursor: st + 2 < all.length ? all[st + 1].crmId : null, generatedAt: new Date().toISOString(), data: all.slice(st, st + 2) });
+    }
+    if (req.method === "POST" && req.url === "/api/integrations/crm/notifications") { // notifikasi CRM → WO (idempoten per userId+dedupeKey)
+      if (woMode === "down") return send(503, { error: "layanan sibuk" });
+      if (!body.userId || !body.title || !String(body.link ?? "/").startsWith("/") || !/^[A-Z0-9_]+$/.test(body.type ?? "")) return send(422, { error: "isi tidak valid" });
+      if (body.userId === "u-gone") return send(404, { error: "pengguna tidak ada" });
+      const dup = woNotes.some((x) => x.userId === body.userId && x.dedupeKey === body.dedupeKey);
+      if (!dup) woNotes.push(body);
+      return send(dup ? 200 : 201, { ok: true, duplicate: dup });
     }
     const [, kind, crmId] = /^\/api\/integrations\/crm\/(catalog|quotations)\/([^/?]+)/.exec(req.url!) ?? [];
     woCalls.push({ method: req.method!, path: `${kind}/${crmId}`, body });
@@ -340,6 +348,9 @@ test("Lead: tautan otomatis (internet & layanan tambahan), ikut status WO, tahap
   assert.equal(r.status, 201);
   let l1 = await r.json();
   assert.equal(l1.customerCode, "A1"); assert.equal(l1.linkState, "AUTO"); assert.equal(l1.stage, "REGISTERED");
+  exportData.customers[0].crmLeadRef = "ld-77"; exportData.customers[0].parentCustomerCode = "P-1"; await runSync(); // diekspor apa adanya dari WO; CRM menormalkan huruf besar
+  assert.deepEqual((await pool.query("SELECT crm_lead_ref, parent_customer_code FROM wo_customers WHERE code='A1'")).rows[0], { crm_lead_ref: "LD-77", parent_customer_code: "P-1" });
+  delete exportData.customers[0].crmLeadRef; delete exportData.customers[0].parentCustomerCode;
   exportData.customers[0].status = "INSTALLING"; await runSync();
   assert.equal((await (await call("tNurman", "GET", `/crm/api/leads/${l1.id}`)).json()).stage, "INSTALLING");
   exportData.customers[0] = { ...exportData.customers[0], status: "ACTIVE", activatedAt: new Date().toISOString() }; await runSync();
@@ -607,6 +618,24 @@ test("Lead untuk pelanggan existing: pilih dari WO (acuan), internet = kode baru
   // non-internet: ditautkan langsung ke pelanggan yang dipilih (order jasa tidak membuat pelanggan baru)
   const ln = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "PT Lama", phone: "081355550001", relatedCustomerCode: "EX-1" })).d;
   assert.equal(ln.customerCode, "EX-1"); assert.equal(ln.linkState, "MANUAL"); assert.equal(ln.relatedCustomerCode, "EX-1");
+  // nomor Lead (LD-<id>) dari WO menautkan PASTI ke kode baru, mengalahkan tebakan; kode induk ikut diisi
+  const lj = (await rq("tNurman", "POST", "/leads", { kind: "INTERNET", name: "Cabang Rahasia", phone: "081355559999", relatedCustomerCode: "EX-1" })).d;
+  assert.equal(lj.ref, `LD-${lj.id}`);
+  await pool.query(`INSERT INTO wo_customers (code,name,phone,status,wo_created_at,crm_lead_ref,parent_customer_code) VALUES ('EX-3','Nama Beda','0899','PROSPECT', now() + interval '2 hours', $1, 'EX-1')`, [lj.ref]);
+  await refreshLeadLinks();
+  const lj2 = (await rq("tNurman", "GET", `/leads/${lj.id}`)).d; assert.equal(lj2.customerCode, "EX-3"); assert.equal(lj2.relatedCustomerCode, "EX-1");
+  // non-internet lokasi baru: tidak ditautkan ke pelanggan acuan; payload memakai customer.parentCode
+  const lnl = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "PT Lama Cabang", phone: "081355550002", address: "Jl. Cabang No. 2, Bekasi", relatedCustomerCode: "EX-1", newLocation: true })).d;
+  assert.equal(lnl.customerCode, null); assert.equal(lnl.newLocation, true);
+  const cit = (await rq("tMgr", "POST", "/catalog", { name: "Item Cabang", sku: "CAB-1", kind: "SERVICE", unit: "paket", price: 500000 })).d.id;
+  const qn = (await rq("tNurman", "POST", "/quotations", { leadId: lnl.id, lines: [{ catalogId: cit, qty: 1 }] })).d;
+  const { quotationWoPayload } = await import("./woPayload.js"); const { detail } = await import("./quotations.js");
+  const sentQ = await detail((await pool.query("SELECT * FROM quotations WHERE id=$1", [qn.id])).rows[0]);
+  const pl = quotationWoPayload({ ...sentQ, status: "SENT" } as any)!;
+  assert.equal(pl.customer.code, undefined); assert.equal(pl.customer.parentCode, "EX-1");
+  const qs = (await rq("tNurman", "POST", "/quotations", { leadId: ln.id, lines: [{ catalogId: cit, qty: 1 }] })).d; // pelanggan yang sama → customer.code, tanpa parentCode
+  const pl2 = quotationWoPayload({ ...(await detail((await pool.query("SELECT * FROM quotations WHERE id=$1", [qs.id])).rows[0])), status: "SENT" } as any)!;
+  assert.equal(pl2.customer.code, "EX-1"); assert.equal(pl2.customer.parentCode, undefined);
 });
 
 test("Jejak marketing permanen: snapshot id+nama pada lead & penawaran; tahan ganti nama/hapus di WO; payload PUT WO selalu memuat marketingUserId+marketingName", async () => {
@@ -766,6 +795,7 @@ test("Kirim CRM → WO (outbox): katalog dulu baru penawaran, jejak marketing, i
   const l2 = (await rq("tNurman", "POST", "/leads", { kind: "NON_INTERNET", name: "Kantor Outbox", phone: "0812 8888 0002", address: "Jl. Kantor No. 9, Bandung" })).d;
   const q2 = (await rq("tNurman", "POST", "/quotations", { leadId: l2.id, lines: [{ catalogId: svc, qty: 1 }] })).d;
   await rq("tNurman", "POST", `/quotations/${q2.id}/submit`); await rq("tMgr", "POST", `/quotations/${q2.id}/approve`); await rq("tNurman", "POST", `/quotations/${q2.id}/send`);
+  await pool.query("DELETE FROM wo_outbox WHERE kind='NOTIFICATION'"); // notifikasi diuji terpisah
   process.env.CRM_INTEGRATION_KEY = "kunci-salah-xxxxxxxx";
   r = await processOutbox(); assert.deepEqual([r.blocked, r.retry], [0, 1]);
   const err401 = (await q1("SELECT last_error, last_http FROM wo_outbox WHERE kind='QUOTATION' AND ref_id=$1 AND status='PENDING'", [q2.id]))[0];
@@ -992,4 +1022,28 @@ test("Admin CRM: Data & Backup (backup/restore/upload/hapus), purge 3 tingkat + 
   assert.equal(await autoBackupTick(at(5)), null); // dimatikan
   await rq("tAdmin", "PUT", "/admin/data/auto", { autoDaily: true });
   delete process.env.CRM_INTEGRATION_KEY;
+});
+
+test("Notifikasi → WO (POST /integrations/crm/notifications): lewat antrean, idempoten, 404 tidak diulang, link berawalan /crm, jeda & sakelar ditaati", async () => {
+  const { notify } = await import("./notify.js");
+  const { processOutbox } = await import("./woPush.js");
+  process.env.CRM_INTEGRATION_KEY = CRM_KEY; woMode = "ok"; woNotes.length = 0;
+  await pool.query("DELETE FROM wo_outbox"); await pool.query("DELETE FROM crm_notifications");
+  await notify(["u-nurman"], { type: "QUOTATION_APPROVED", title: "Penawaran QT-1 disetujui", body: "x", href: "/quotations/1", key: "k1" });
+  await notify(["u-nurman"], { type: "QUOTATION_APPROVED", title: "ganda", href: "/quotations/1", key: "k1" }); // dedupe lokal: tidak diantre lagi
+  await notify(["u-gone"], { type: "TASK_DUE", title: "untuk pengguna hilang", key: "k2" });
+  assert.equal((await pool.query("SELECT count(*)::int n FROM wo_outbox WHERE kind='NOTIFICATION'")).rows[0].n, 2);
+  const r = await processOutbox(); assert.equal(r.done, 2); assert.equal(r.blocked + r.retry, 0); // 404 → selesai (dilewati), bukan BLOCKED
+  assert.equal(woNotes.length, 1); assert.deepEqual([woNotes[0].userId, woNotes[0].link, woNotes[0].dedupeKey, woNotes[0].type], ["u-nurman", "/crm/quotations/1", "k1", "QUOTATION_APPROVED"]);
+  // WO turun → dicoba ulang, tidak hilang
+  await notify(["u-nurman"], { type: "REPORT_COMMENT", title: "komentar", href: "/reports/2", key: "k3" });
+  woMode = "down"; const r2 = await processOutbox(); assert.equal(r2.retry, 1);
+  woMode = "ok"; await pool.query("UPDATE wo_outbox SET next_attempt_at=now() WHERE status='PENDING'");
+  assert.equal((await processOutbox()).done, 1); assert.equal(woNotes.length, 2);
+  // sakelar: WO_NOTIFY_ENABLED=0 → hanya lonceng, tidak diantre
+  process.env.WO_NOTIFY_ENABLED = "0";
+  await notify(["u-nurman"], { type: "TASK_DUE", title: "tanpa push", key: "k4" });
+  assert.equal((await pool.query("SELECT count(*)::int n FROM wo_outbox WHERE status='PENDING'")).rows[0].n, 0);
+  assert.equal((await pool.query("SELECT count(*)::int n FROM crm_notifications WHERE dedupe_key='k4'")).rows[0].n, 1);
+  delete process.env.WO_NOTIFY_ENABLED; delete process.env.CRM_INTEGRATION_KEY;
 });

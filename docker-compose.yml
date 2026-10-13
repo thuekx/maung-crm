@@ -49,6 +49,8 @@ services:
       # Kirim katalog & penawaran CRM → WO (PUT /api/integrations/crm/*). Kunci = CRM_INTEGRATION_KEY di WO; hanya di .env, tidak pernah dicatat. WO_SYNC_ENABLED=0 = sakelar mati.
       CRM_INTEGRATION_KEY: ${CRM_INTEGRATION_KEY:-}
       WO_SYNC_ENABLED: ${WO_SYNC_ENABLED:-1}
+      # Teruskan notifikasi lonceng ke WO (POST /api/integrations/crm/notifications → Telegram/email/kotak masuk sesuai penerima). 0 = hanya lonceng di CRM.
+      WO_NOTIFY_ENABLED: ${WO_NOTIFY_ENABLED:-1}
       PHONE_DEFAULT_REGION: ${PHONE_DEFAULT_REGION:-ID}
       BACKUP_DIR: /backups
     depends_on:
