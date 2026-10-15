@@ -82,6 +82,13 @@ cd ~/maung-crm && bash scripts/check-quotation-wo.sh
    (atau satu nomor: `bash scripts/check-quotation-wo.sh QT-026-0001`). `order_wo_terbentuk=1` + nomor `WO-SO-…` = berhasil. Antrean kirim berjalan tiap ±1 menit, jadi tunggu 1–2 menit setelah klik.
 3. Cek di WO (UI): order muncul untuk marketing pembuat, jejak marketing (id + nama) terisi, SKU produk terpetakan ke barang bila SKU diisi.
 
+## Diagnosa "Maung WO tidak dapat dihubungi"
+CRM memvalidasi login dengan `GET {WO_URL}/api/auth/me` dari dalam container `crm-api`. Pesan ini muncul bila WO tidak menjawab (jaringan/DNS, timeout 8 dtk, 5xx/429 setelah satu kali coba ulang, atau jawaban bukan JSON); alasannya tertulis dalam kurung dan di log `crm-api` (`[auth] ...`). Pengguna yang tervalidasi ≤10 menit sebelumnya tetap dilayani selama WO sesaat tidak terjangkau. Cek (baca-saja):
+```
+cd ~/maung-crm && git pull --ff-only origin main && bash scripts/check-wo-auth.sh </dev/null
+```
+`dari_crm_api_auth_me=401(application/json)` dan `5x_berturut=401/401/401/401/401` = jalur sehat.
+
 ## E4. Admin CRM: Pengaturan & Data/Backup (ditautkan dari Pusat Admin WO)
 Halaman (hanya **Admin asli** WO; peran lain & Admin yang sedang "bertindak sebagai" ditolak API dan menu tidak tampil): `/crm/admin/settings` (bawaan penawaran, jeda kirim ke WO, status integrasi baca-saja) dan `/crm/admin/data` (ringkasan, backup/restore `.json.gz` manual + otomatis harian 02:30 simpan 7, unduh/unggah/hapus, purge 3 cakupan atau "hanya demo" dengan konfirmasi `HAPUS DATA`, data demo dengan konfirmasi `MUAT DEMO`; restore dengan konfirmasi `RESTORE`).
 - Backup disimpan di volume Docker **`crm_backups`** (`/backups` di crm-api), terpisah dari `pgdata`. **Jangan `docker compose down -v`.** Unduh salinan ke luar server secara berkala.

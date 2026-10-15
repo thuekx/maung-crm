@@ -19,43 +19,88 @@ declare global {
 }
 
 const cache = new Map<string, { exp: number; user: Principal }>();
+const inflight = new Map<string, Promise<Principal | null>>();
 const TTL_MS = 60_000;
+/** Bila WO sesaat tidak terjangkau (restart/deploy, jaringan), pengguna yang tervalidasi ≤10 menit lalu tetap dilayani. */
+const STALE_MS = 10 * 60_000;
+const TIMEOUT_MS = 8_000;
+
+/** WO tidak menjawab dengan benar — `reason` dicatat di log dan ditampilkan singkat ke pengguna. */
+class WoUnreachable extends Error {
+  constructor(readonly reason: string) { super(reason); }
+}
+
+async function fetchMe(token: string): Promise<globalThis.Response> {
+  let last: WoUnreachable | undefined;
+  for (let i = 0; i < 2; i++) {
+    if (i) await new Promise((r) => setTimeout(r, 400));
+    try {
+      const r = await fetch(`${WO_URL()}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      if (r.status === 429 || r.status >= 500) { last = new WoUnreachable(`HTTP ${r.status}`); continue; } // sementara → ulangi sekali
+      return r;
+    } catch (e) {
+      const c = (e as { cause?: { code?: string } }).cause?.code;
+      last = new WoUnreachable((e as Error).name === "TimeoutError" ? "timeout" : c ?? (e as Error).message);
+    }
+  }
+  throw last!;
+}
 
 /** Validasi token ke WO: GET /api/auth/me (200 = valid; 401 = tidak valid/kedaluwarsa). Satu panggilan memberi peran + fitur. */
 async function whoAmI(token: string): Promise<Principal | null> {
-  const hit = cache.get(token);
-  if (hit && hit.exp > Date.now()) return hit.user;
-  const r = await fetch(`${WO_URL()}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+  const r = await fetchMe(token);
   if (r.status === 401) return null;
-  if (!r.ok) throw new Error(`WO /auth/me ${r.status}`);
-  const d = (await r.json()) as { id?: string; name?: string; email?: string; role?: string; subRole?: string; features?: unknown; acting?: unknown };
+  if (!r.ok) throw new WoUnreachable(`HTTP ${r.status}`);
+  let d: { id?: string; name?: string; email?: string; role?: string; subRole?: string; features?: unknown; acting?: unknown };
+  try { d = await r.json(); } catch { throw new WoUnreachable(`jawaban bukan JSON (${r.headers.get("content-type") ?? "-"})`); }
   if (!d.id || !d.role) return null;
   const user: Principal = {
     id: String(d.id), name: d.name ?? String(d.id), email: d.email, role: d.role, subRole: d.subRole,
     features: Array.isArray(d.features) ? d.features.filter((f): f is string => typeof f === "string") : [],
     acting: !!d.acting,
   };
-  if (cache.size > 500) for (const [k, v] of cache) if (v.exp <= Date.now()) cache.delete(k);
+  if (cache.size > 500) for (const [k, v] of cache) if (v.exp + STALE_MS <= Date.now()) cache.delete(k);
   cache.set(token, { exp: Date.now() + TTL_MS, user });
+  // cache nama/peran untuk daftar PIC — gagal tulis di DB CRM bukan alasan menolak login
   await pool.query(
     `INSERT INTO wo_user_cache (user_id,name,email,role,sub_role,seen_at) VALUES ($1,$2,$3,$4,$5,now())
      ON CONFLICT (user_id) DO UPDATE SET name=$2,email=$3,role=$4,sub_role=$5,seen_at=now()`,
     [user.id, user.name, user.email ?? null, user.role, user.subRole ?? null],
-  );
+  ).catch((e) => console.error("[auth] wo_user_cache:", (e as Error).message));
   return user;
+}
+
+/** Satu panggilan ke WO per token sekaligus (Dashboard memanggil beberapa API bersamaan). */
+async function resolve(token: string): Promise<Principal | null> {
+  const hit = cache.get(token);
+  if (hit && hit.exp > Date.now()) return hit.user;
+  let p = inflight.get(token);
+  if (!p) {
+    p = whoAmI(token).finally(() => inflight.delete(token));
+    inflight.set(token, p);
+  }
+  try {
+    return await p;
+  } catch (e) {
+    if (e instanceof WoUnreachable && hit && hit.exp + STALE_MS > Date.now()) return hit.user;
+    throw e;
+  }
 }
 
 export async function authenticate(req: Request, res: Response, next: NextFunction) {
   const m = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
   if (!m) return void res.status(401).json({ error: "Belum login" });
+  let u: Principal | null;
   try {
-    const u = await whoAmI(m[1]);
-    if (!u) return void res.status(401).json({ error: "Token tidak valid atau kedaluwarsa" });
-    req.user = u;
-    next();
-  } catch {
-    res.status(502).json({ error: "Maung WO tidak dapat dihubungi" });
+    u = await resolve(m[1]);
+  } catch (e) {
+    const reason = e instanceof WoUnreachable ? e.reason : (e as Error).message;
+    console.error(`[auth] GET ${WO_URL()}/api/auth/me gagal: ${reason}`);
+    return void res.status(502).json({ error: `Maung WO tidak dapat dihubungi (${reason}). Coba muat ulang sebentar lagi.` });
   }
+  if (!u) return void res.status(401).json({ error: "Token tidak valid atau kedaluwarsa" });
+  req.user = u;
+  next();
 }
 
 // Gerbang: ADMIN, atau fitur app.crm diberikan di WO. Cakupan data: ADMIN / MKT MANAGER|SUPERVISOR = reviewer (lihat semua);
@@ -78,4 +123,6 @@ export function requireRealAdmin(req: Request, res: Response, next: NextFunction
 }
 
 /** Hanya untuk uji. */
-export const _clearAuthCache = () => cache.clear();
+export const _clearAuthCache = () => { cache.clear(); inflight.clear(); };
+/** Hanya untuk uji: anggap validasi token sudah lewat TTL. */
+export const _expireAuthCache = () => { for (const v of cache.values()) v.exp = Date.now() - 1; };

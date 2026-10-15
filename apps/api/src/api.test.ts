@@ -89,6 +89,7 @@ const exportMock = (req: http.IncomingMessage, res: http.ServerResponse) => {
   res.end(JSON.stringify({ data: rows.slice(start, start + lim), nextCursor: next }));
 };
 const { pool } = await import("./db.js");
+let woMeFail: number | "reset" | 0 = 0, woMeCalls = 0;
 
 before(async () => {
   wo = http.createServer((req, res) => {
@@ -104,6 +105,9 @@ before(async () => {
     }
     if (req.url === "/api/subscription-settings") { res.statusCode = 200; return void res.end(JSON.stringify({ managerName: woManager, bankName: "BANK BCA KCP Buahbatu BANDUNG", accName: "Lintas Satu Visi PT", accNo: "7753555511" })); }
     if (req.url === "/api/auth/me") {
+      woMeCalls++;
+      if (woMeFail === "reset") return void req.socket.destroy();
+      if (woMeFail) { res.statusCode = woMeFail; return void res.end("<html>bad gateway</html>"); }
       const u = USERS[t];
       res.statusCode = u ? 200 : 401;
       return void res.end(JSON.stringify(u ?? { error: "Belum login" }));
@@ -151,6 +155,30 @@ test("auth lewat /api/auth/me WO; gerbang app.crm; tanpa token 401", async () =>
   assert.equal((await call("tAdmin", "GET", "/crm/api/me")).status, 200); // ADMIN selalu boleh
   assert.equal((await (await call("tFin", "GET", "/crm/api/me")).json()).reviewer, false); // fitur ada, bukan reviewer
   await call("tRasyad", "GET", "/crm/api/me"); // mengisi cache PIC
+});
+
+test("WO sesaat tidak terjangkau: pengguna yang baru tervalidasi tetap dilayani, lainnya 502 dengan alasan; panggilan paralel digabung", async (t) => {
+  const { _expireAuthCache, _clearAuthCache } = await import("./auth.js");
+  assert.equal((await call("tMgr", "GET", "/crm/api/me")).status, 200);
+  _expireAuthCache();
+  woMeCalls = 0;
+  await Promise.all([1, 2, 3, 4].map(() => call("tMgr", "GET", "/crm/api/me")));
+  assert.equal(woMeCalls, 1); // 4 permintaan Dashboard sekaligus → satu GET /auth/me
+  _expireAuthCache();
+  t.after(() => { woMeFail = 0; });
+  for (const fail of [503, "reset"] as const) {
+    woMeFail = fail;
+    assert.equal((await call("tMgr", "GET", "/crm/api/me")).status, 200); // cadangan ≤10 menit
+    const r = await call("tNurman", "GET", "/crm/api/me"); // belum pernah tervalidasi
+    assert.equal(r.status, 502);
+    assert.match((await r.json()).error, fail === 503 ? /HTTP 503/ : /tidak dapat dihubungi \(/);
+  }
+  woMeFail = 0;
+  assert.equal((await call("tNurman", "GET", "/crm/api/me")).status, 200); // WO kembali → normal
+  woMeFail = 401; // 401 tetap berarti token tidak valid, tanpa cadangan
+  _clearAuthCache();
+  assert.equal((await call("tMgr", "GET", "/crm/api/me")).status, 401);
+  woMeFail = 0;
 });
 
 test("rute lama /api/* bukan milik CRM (milik WO) → 404", async () => {
