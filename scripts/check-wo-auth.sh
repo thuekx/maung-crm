@@ -13,13 +13,13 @@ exec > >(tee -a "$LOG") 2>&1
 cd "$HERE" || exit 1
 dc() { docker compose "$@"; }
 STATUS=FAIL; NEXT=""
-WO_URL_V=n/a; S_API=n/a; IN_DNS=n/a; IN_ME=n/a; IN_MS=n/a; IN_ERR=n/a; IN_LOOP=n/a; HOST_ME=n/a; LOG_HITS=n/a; WO_CT=n/a
+WO_URL_V=n/a; S_API=n/a; IN_DNS=n/a; IN_ME=n/a; IN_MS=n/a; IN_ERR=n/a; IN_LOOP=n/a; HOST_ME=n/a; HOST_LOCAL=n/a; LOG_HITS=n/a; WO_CT=n/a
 result() {
   banner "RESULT"
   kv status "$STATUS"; kv host "$(hostname)"
   kv wo_url "$WO_URL_V"; kv crm_api "$S_API"
   kv dari_crm_api_dns "$IN_DNS"; kv dari_crm_api_auth_me "$IN_ME"; kv dari_crm_api_ms "$IN_MS"; kv dari_crm_api_galat "$IN_ERR"
-  kv dari_crm_api_5x_berturut "$IN_LOOP"; kv dari_host_auth_me "$HOST_ME"
+  kv dari_crm_api_5x_berturut "$IN_LOOP"; kv dari_host_auth_me "$HOST_ME"; kv dari_host_lokal_auth_me "$HOST_LOCAL"
   kv log_crm_api_24jam_galat_auth "$LOG_HITS"; kv container_wo "$WO_CT"
   kv perubahan_ke_sistem TIDAK_ADA; kv log "$LOG"
   for w in "${WARNS[@]:-}"; do [ -n "$w" ] && printf '  - %s\n' "$w"; done
@@ -62,7 +62,10 @@ echo "  dns=$IN_DNS  auth/me=$IN_ME  ${IN_MS}ms  galat=$IN_ERR  5x=$IN_LOOP"
 
 phase "Dari host VM (pembanding)"
 HOST_ME=$(curl -s -o /dev/null -m 15 -w '%{http_code} %{time_total}s ip=%{remote_ip}' "$WO_URL_V/api/auth/me" 2>/dev/null || echo 000)
-echo "  $HOST_ME"
+H=$(printf '%s' "$WO_URL_V" | sed -E 's#^[a-z]+://##; s#[/:].*$##')
+HOST_LOCAL=$(curl -s -o /dev/null -m 15 --resolve "$H:443:127.0.0.1" -w '%{http_code}' "$WO_URL_V/api/auth/me" 2>/dev/null || echo 000)
+echo "  lewat IP publik: $HOST_ME"
+echo "  lewat Caddy lokal (127.0.0.1): $HOST_LOCAL"
 
 phase "Log crm-api 24 jam terakhir"
 HITS=$(dc logs --since 24h crm-api 2>/dev/null | grep -iE 'auth/me|\[auth\]|ECONN|ENOTFOUND|EAI_AGAIN|fetch failed|UND_ERR' | tail -15)

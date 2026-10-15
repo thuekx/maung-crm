@@ -83,7 +83,7 @@ cd ~/maung-crm && bash scripts/check-quotation-wo.sh
 3. Cek di WO (UI): order muncul untuk marketing pembuat, jejak marketing (id + nama) terisi, SKU produk terpetakan ke barang bila SKU diisi.
 
 ## Diagnosa "Maung WO tidak dapat dihubungi"
-CRM memvalidasi login dengan `GET {WO_URL}/api/auth/me` dari dalam container `crm-api`. Pesan ini muncul bila WO tidak menjawab (jaringan/DNS, timeout 8 dtk, 5xx/429 setelah satu kali coba ulang, atau jawaban bukan JSON); alasannya tertulis dalam kurung dan di log `crm-api` (`[auth] ...`). Pengguna yang tervalidasi ≤10 menit sebelumnya tetap dilayani selama WO sesaat tidak terjangkau. Cek (baca-saja):
+CRM memvalidasi login dengan `GET {WO_URL}/api/auth/me` dari dalam container `crm-api`. Sejak 15 Okt 2026 nama host WO (`WO_HOST`, diisi update.sh) dipetakan ke `host-gateway`, jadi jalur ini lewat Caddy WO di VM yang sama, tidak lewat IP publik/hairpin NAT router. Pesan ini muncul bila WO tidak menjawab (jaringan/DNS, timeout 8 dtk, 5xx/429 setelah satu kali coba ulang, atau jawaban bukan JSON); alasannya tertulis dalam kurung dan di log `crm-api` (`[auth] ...`). Pengguna yang tervalidasi ≤10 menit sebelumnya tetap dilayani selama WO sesaat tidak terjangkau. Cek (baca-saja):
 ```
 cd ~/maung-crm && git pull --ff-only origin main && bash scripts/check-wo-auth.sh </dev/null
 ```

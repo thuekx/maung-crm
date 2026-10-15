@@ -9,8 +9,8 @@ name: maung-crm
 # `crm-key` (S3_*) tetap. JANGAN `docker compose down -v` di sini sebelum volume Garage lama diadopsi/difinalisasi.
 # Konfigurasi lewat .env (lihat .env.example). IMAGE_TAG WAJIB (SHA commit; tidak ada `latest` bawaan).
 #
-# Bila container tidak bisa menjangkau WO_URL (hairpin), tambahkan pada crm-api:
-#   extra_hosts: ["maung.liv.net.id:host-gateway"]
+# crm-api menjangkau WO_URL lewat host ini sendiri (extra_hosts → host-gateway → Caddy WO di port 443 host), bukan lewat
+# IP publik: tidak bergantung pada hairpin NAT router (MikroTik). WO_HOST = nama host dari WO_URL, diisi scripts/update.sh.
 # — jangan menempel CRM ke jaringan WO.
 
 services:
@@ -30,6 +30,7 @@ services:
   crm-api:
     image: ghcr.io/thuekx/maung-crm-api:${IMAGE_TAG:?isi IMAGE_TAG (SHA commit image)}
     restart: unless-stopped
+    extra_hosts: ["${WO_HOST:?isi WO_HOST (nama host dari WO_URL, mis. maung.liv.net.id)}:host-gateway"]
     environment:
       TZ: Asia/Jakarta
       PORT: "4000"

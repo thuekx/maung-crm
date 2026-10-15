@@ -19,7 +19,7 @@ exec > >(tee -a "$LOG") 2>&1
 cd "$HERE" || exit 1
 ENVF="$HERE/.env"; ENV_BAK="$BK_DIR/crm-env-$TS.bak"
 STATUS=FAIL; REASON=""; ROLL_ARMED=0; ROLLED=no; FIRST_RUN=no
-COMMIT=""; TAG=""; PREV_TAG=""; WO_URL=""; LEGACY_IDS=""; PREV_MODE=no
+COMMIT=""; TAG=""; PREV_TAG=""; WO_URL=""; WO_HOST=""; LEGACY_IDS=""; PREV_MODE=no
 V_HOST=n/a; V_WOENV=n/a; V_WOCT=n/a; V_LOGIN_B=n/a; V_BRAND_B=n/a; V_LOGIN_A=n/a; V_BRAND_A=n/a
 V_PGDUMP=n/a; V_GARAGEBK=n/a; V_PULL=n/a; V_UP=n/a; V_GARAGE=n/a
 E_ME=n/a; E_INT=n/a; E_ME_NOTOKEN=n/a; E_PROBE_API=n/a; E_PROBE_WEB=n/a; E_NET=n/a; E_PORTS=n/a
@@ -31,7 +31,8 @@ setenv() { if grep -q "^$1=" "$ENVF"; then sed -i "s|^$1=.*|$1=$2|" "$ENVF"; els
 delenv() { sed -i "/^$1=/d" "$ENVF"; }
 cid() { dc ps -aq "$1" 2>/dev/null | head -1; }
 hstat() { docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1" 2>/dev/null || echo none; }
-http() { curl -s -o /dev/null -m 15 -w '%{http_code}' "$1" 2>/dev/null || echo 000; }
+# cek dari host ke WO lewat Caddy lokal (127.0.0.1), bukan IP publik — sama dengan jalur crm-api (extra_hosts host-gateway)
+http() { curl -s -o /dev/null -m 15 ${WO_HOST:+--resolve "$WO_HOST:443:127.0.0.1" --resolve "$WO_HOST:80:127.0.0.1"} -w '%{http_code}' "$1" 2>/dev/null || echo 000; }
 sha() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
 wo_ids() { docker ps -a --filter "label=com.docker.compose.project=maung-wo-inv" --format '{{.Names}} {{.ID}} {{.State}}' 2>/dev/null | sort; }
 wait_healthy() { # wait_healthy <service> <detik>
@@ -132,7 +133,8 @@ echo "$WO_IDS_BEFORE" | awk '{print "  WO " $1 ": " $3}'
 if [ -f "$ENVF" ]; then WO_URL=$(getenv WO_URL); fi
 if [ -z "$WO_URL" ]; then dom=$(grep -m1 '^WEB_DOMAIN=' "$WO_DIR/.env" | cut -d= -f2- | tr -d "'\""); [ -n "$dom" ] && WO_URL="https://$dom"; fi
 [ -n "$WO_URL" ] || fail "WO_URL tidak dapat ditentukan (WEB_DOMAIN kosong di WO dan .env CRM belum ada)"
-echo "  WO_URL=$WO_URL"
+WO_HOST=$(printf '%s' "$WO_URL" | sed -E 's#^[a-z]+://##; s#[/:].*$##')
+echo "  WO_URL=$WO_URL  (dijangkau lewat host ini: $WO_HOST → host-gateway)"
 V_LOGIN_B=$(http "$WO_URL/login"); V_BRAND_B=$(http "$WO_URL/api/branding")
 echo "  sebelum: /login=$V_LOGIN_B  /api/branding=$V_BRAND_B"
 [ "$V_LOGIN_B" = 200 ] && [ "$V_BRAND_B" = 200 ] && ok "WO sehat sebelum update" || warn "WO tidak 200 sebelum update (login=$V_LOGIN_B branding=$V_BRAND_B) — bukan akibat skrip ini"
@@ -147,12 +149,12 @@ fi
 chmod 600 "$ENVF"; cp -p "$ENVF" "$ENV_BAK"; ok "backup .env → $ENV_BAK"
 PREV_TAG=$(cat "$STATE_DIR/last_ok_tag" 2>/dev/null || true)
 [ -n "$PREV_TAG" ] && [ -n "$(cid crm-api)" ] && PREV_MODE=yes
-setenv WO_URL "$WO_URL"
+setenv WO_URL "$WO_URL"; setenv WO_HOST "$WO_HOST"
 for k in WEB_PORT CRM_DOMAIN WO_NETWORK; do grep -q "^$k=" "$ENVF" && { delenv "$k"; echo "  (kunci usang $k dihapus dari .env CRM)"; }; done
 getenv COMPOSE_FILE | grep -q 'wo-vm\|caddy' && { delenv COMPOSE_FILE; echo "  (COMPOSE_FILE usang dihapus)"; }
 TAG="$COMMIT"; setenv IMAGE_TAG "$TAG"
 echo "  image_tag=${TAG:0:12}…  tag_sebelumnya=${PREV_TAG:+${PREV_TAG:0:12}…}${PREV_TAG:-(tidak ada)}"
-for k in POSTGRES_PASSWORD FILE_SIGN_SECRET WO_URL IMAGE_TAG; do [ -n "$(getenv "$k")" ] || fail ".env: $k kosong"; done
+for k in POSTGRES_PASSWORD FILE_SIGN_SECRET WO_URL WO_HOST IMAGE_TAG; do [ -n "$(getenv "$k")" ] || fail ".env: $k kosong"; done
 { [ -n "$(getenv S3_ACCESS_KEY)" ] && [ -n "$(getenv S3_SECRET_KEY)" ]; } || fail ".env: S3_ACCESS_KEY/S3_SECRET_KEY kosong — buat kunci di Garage bersama: cd ~/Maung-Wo-Inv && bash scripts/garage-app.sh crm --env-file ~/maung-crm/.env </dev/null (rahasia tidak dicetak)"
 [ -z "$(getenv GARAGE_RPC_SECRET)" ] || echo "  (GARAGE_RPC_SECRET lama di .env tidak dipakai lagi; dibiarkan agar rollback cutover tetap mungkin — aman dihapus setelah garage-platform.sh finalize)"
 ok "variabel wajib terisi (nilai secret tidak ditampilkan)"
