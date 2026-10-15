@@ -34,6 +34,7 @@ jobs:
         env:
           POSTGRES_PASSWORD: ci
           WO_URL: https://wo.example.test
+          WO_HOST: wo.example.test
           FILE_SIGN_SECRET: ci
         run: |
           if docker compose config -q 2>/dev/null; then echo "IMAGE_TAG seharusnya wajib"; exit 1; fi
